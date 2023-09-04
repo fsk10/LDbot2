@@ -1,0 +1,13 @@
+# Dependency directory
+node_modules/
+
+# Database
+database/db.sqlite
+
+# Environment variables and configuration
+*.env
+config.json
+
+# Logs
+logs/
+*.log

@@ -1,0 +1,24 @@
+{
+  "name": "LDbot2",
+  "version": "1.0.0",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js"
+  },
+  "keywords": [
+    "discordapp",
+    "bot",
+    "discordjs"
+  ],
+  "author": "Peter Hedman <peter.hedman@mail.com>",
+  "license": "GPL-3.0-only",
+  "dependencies": {
+    "@discordjs/builders": "^1.6.5",
+    "discord-api-types": "^0.37.55",
+    "discord.js": "^14.13.0",
+    "luxon": "^3.4.2",
+    "sequelize": "^6.32.1",
+    "sqlite3": "^5.1.6",
+    "winston": "^3.10.0"
+  }
+}
