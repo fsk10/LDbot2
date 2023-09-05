@@ -2,9 +2,9 @@ const { SlashCommandBuilder } = require('@discordjs/builders');
 const { listUsers, listEvents } = require('../../database/operations');
 const { EmbedBuilder } = require('discord.js');
 const { isAdmin } = require('../../utils/permissions');
-const formatDisplayDate = require('../../utils/dateUtils');
+const { formatDisplayDate } = require('../../utils/dateUtils');
 const { EventModel } = require('../../models');
-
+const { getNameFromID } = require('../../utils/getNameFromID');
 
 const commandData = new SlashCommandBuilder()
     .setName('adminlist')
@@ -22,7 +22,7 @@ const commandData = new SlashCommandBuilder()
             .setDescription('List all events'));
 
 
-            function splitEmbeds(users, eventName) {
+            function splitEmbeds(users, eventName, interaction) {
                 const MAX_SIZE = 4096;
             
                 let embeds = [];
@@ -32,8 +32,11 @@ const commandData = new SlashCommandBuilder()
                 users.forEach(user => {
                     const seat = user.events && user.events[0] ? user.events[0].EventUsers.seat : 'N/A';
                     const haspaid = user.events && user.events[0] ? user.events[0].EventUsers.haspaid : false;
-            
-                    let userInfo = `**${user.nickname}**\nUser ID: ${user.id}\nDiscord ID: ${user.discorduser}\nSeat: ${seat}\nPaid: ${haspaid ? 'Yes' : 'No'}\nFull Name: ${user.firstname} ${user.lastname}\nEmail: ${user.email}\nCountry: ${user.country}\n\n`;
+
+                    const nameResult = getNameFromID(interaction, user.discorduser);
+                    const discordName = (nameResult && nameResult.type === 'user') ? `@${nameResult.name}` : 'Unknown';
+
+                    let userInfo = `**${user.nickname}**\nUser ID: ${user.id}\nDiscord Name: ${discordName}\nDiscord ID: ${user.discorduser}\nSeat: ${seat}\nPaid: ${haspaid ? 'Yes' : 'No'}\nFull Name: ${user.firstname} ${user.lastname}\nEmail: ${user.email}\nCountry: ${user.country}\n\n`;
             
                     if (charCount + userInfo.length > MAX_SIZE) {
                         embeds.push(new EmbedBuilder()
@@ -80,7 +83,7 @@ async function execute(interaction) {
         const users = await listUsers(eventId);
         const event = await EventModel.findOne({ where: { id: eventId } });
         const eventName = event ? event.name : "Unknown Event";
-        const userEmbeds = splitEmbeds(users, eventName);
+        const userEmbeds = splitEmbeds(users, eventName, interaction);
 
         // Defer the reply to the interaction.
         await interaction.deferReply({ ephemeral: true });
