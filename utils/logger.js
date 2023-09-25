@@ -27,7 +27,19 @@ const appendTimestamp = format((info, opts) => {
 });
 
 // Formats
+
+const errorObjectFormat = format(info => {
+    if (info instanceof Error) {
+        return Object.assign({
+            message: `${info.message} \n${info.stack}`
+        }, info);
+    }
+    return info;
+});
+
+
 const consoleFormat = format.combine(
+    errorObjectFormat(),
     format.colorize(),
     appendTimestamp({ tz: 'Europe/Stockholm' }),
     format.printf(({ level, message, timestamp }) => {
@@ -36,11 +48,13 @@ const consoleFormat = format.combine(
 );
 
 const fileFormat = format.combine(
+    errorObjectFormat(),
     appendTimestamp({ tz: 'Europe/Stockholm' }),
     format.printf(({ level, message, timestamp }) => {
         return `${level}: [${timestamp}] ${message}`;
     })
 );
+
 
 // Create a logger
 const logger = createLogger({

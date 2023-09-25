@@ -1,5 +1,5 @@
 module.exports = (sequelize) => {
-    const { DataTypes, Model } = require('sequelize');
+    const { Sequelize, DataTypes, Model } = require('sequelize');
 
     class EventUsers extends Model {}
 
@@ -27,9 +27,18 @@ module.exports = (sequelize) => {
             allowNull: true,
             defaultValue: false
         },
+        paidAt: {
+            type: DataTypes.DATE,
+            allowNull: true
+        },
         preferredseats: {
             type: DataTypes.STRING,
             allowNull: true
+        },
+        status: {
+            type: Sequelize.STRING,
+            allowNull: false,
+            defaultValue: 'available'
         }
     }, {
         sequelize,

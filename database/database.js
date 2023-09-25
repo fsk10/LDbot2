@@ -24,24 +24,18 @@ async function initializeDatabase() {
     await sequelize.sync()
         .then(() => {
             logger.info("Database initialized.");
-            // Add any other minimal logic you want to run after initialization.
         })
         .catch(err => {
             logger.error("Error initializing the database:", err);
         });
 
-    logger.info("[DB] All models were synchronized successfully.");
-
     // Initialization for settings
-    logger.info("[DB] Initializing settings...");
     for (let settingName of defaultSettings) {
-        logger.info(`[DB] Checking setting: ${settingName}`);
         await Settings.findOrCreate({
             where: { key: settingName },
             defaults: { value: "" }
         });
     }
-    logger.info("[DB] Settings initialized.");
 }
 
 module.exports = {

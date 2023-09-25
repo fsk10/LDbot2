@@ -14,9 +14,13 @@
   "license": "GPL-3.0-only",
   "dependencies": {
     "@discordjs/builders": "^1.6.5",
+    "canvas": "^2.11.2",
     "discord-api-types": "^0.37.55",
     "discord.js": "^14.13.0",
+    "email-validator": "^2.0.4",
+    "jimp": "^0.22.10",
     "luxon": "^3.4.2",
+    "node-cron": "^3.0.2",
     "sequelize": "^6.32.1",
     "sqlite3": "^5.1.6",
     "winston": "^3.10.0"

@@ -8,7 +8,6 @@ const commandFolders = fs.readdirSync(foldersPath);
 const prepareCommands = [];
 const logger = require('./utils/logger');
 
-
 for (const folder of commandFolders) {
     const commandsPath = path.join(foldersPath, folder);
     const commandFiles = fs.readdirSync(commandsPath).filter(file => file.endsWith('.js'));
@@ -17,23 +16,22 @@ for (const folder of commandFolders) {
         const command = require(filePath);
         if ('data' in command && 'execute' in command) {
             if (typeof command.prepare === 'function') {
-				prepareCommands.push(command.prepare);
-			} else {
-				commands.push(command.data.toJSON());
-			}
-			
+                prepareCommands.push(command.prepare);
+            } else {
+                commands.push(command.data);
+            }
         } else {
-            logger.info(`[WARNING] The command at ${filePath} is missing a required "data" or "execute" property.`);
+            console.warn(`[WARNING] The command at ${filePath} is missing a required "data" or "execute" property.`);
         }
     }
 }
 
 const rest = new REST().setToken(BOT_TOKEN);
 
-async function deployCommands() {
+module.exports = async function deployCommands() {
     for (const prepareFunc of prepareCommands) {
         const commandData = await prepareFunc();
-        commands.push(commandData.toJSON());
+        commands.push(commandData);
     }
 
     try {
@@ -44,9 +42,6 @@ async function deployCommands() {
         );
         logger.info(`Successfully reloaded ${data.length} application (/) commands.`);
     } catch (error) {
-        logger.error(error);
+        console.error(error);
     }
-}
-
-module.exports = deployCommands;
-
+};

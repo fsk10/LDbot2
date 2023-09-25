@@ -44,6 +44,13 @@ module.exports = {
             required: true,
             extractionMethod: 'getInteger'
         },
+        {
+            name: 'participantchannel',
+            description: 'Channel for participants list',
+            type: 'STRING',
+            required: false,
+            extractionMethod: 'getString'
+        },
     ],
     user: [
         {

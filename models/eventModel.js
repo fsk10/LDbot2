@@ -29,6 +29,10 @@ module.exports = (sequelize) => {
     entryfee: {
       type: DataTypes.INTEGER
     },
+    participantchannel: {
+      type: DataTypes.STRING,
+      allowNull: true
+    },
     // ... add other fields as needed
   }, 
   {

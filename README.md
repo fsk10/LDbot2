@@ -5,7 +5,7 @@ LDbot2 is a Discord bot designed for managing and organizing events.
 **Disclaimer:** 
 This bot was developed for a specific, personal project and is made public for reference purposes only. The repository does not offer support, guarantees, or warranties for its functionality outside of its original intent. If you choose to utilize or modify the code, do so at your own risk.
 
-## Features *(In-progress)*
+## Features
 **Legend**:
 
 :white_check_mark: Completed :construction: In-Progress :calendar: Planned
@@ -15,31 +15,32 @@ This bot was developed for a specific, personal project and is made public for r
 
 - **Admin Management**:
   - **Settings** 
-    * :white_check_mark: **Simple Permissions System**: Define an admin-role for full bot admin permissions. 
-    * :white_check_mark: **Logging**: Logging of bot activities and interactions to defined logging-channel.
+    * :white_check_mark: **Simple Permissions System:** Define an admin-role for full bot admin permissions. 
+    * :white_check_mark: **Logging:** Logging of bot activities and interactions to defined logging-channel.
   - **Events**
     * :white_check_mark: **Create events**
-    * :construction: **Edit events**
+    * :white_check_mark: **Edit events**
     * :white_check_mark: **Delete event**
     * :white_check_mark: **List events**
-    * :calendar: **Event Status Updates**: Generate dynamic event participation-list in defined event-channel.
-    * :calendar: **Notifications**: Send out notifications for upcoming events & registration info.
+    * :calendar: **Notifications:** Send out notifications for upcoming events & registration info.
   - **Users**
-  	* :white_check_mark: Add users to events
-    * :construction: Edit user details
-    * :white_check_mark: Remove users from events
-    * :white_check_mark: List users in events
+  	* :white_check_mark: **Add users to events**
+  	  * :white_check_mark: **Dynamic participantslist:** Generate dynamic event participants-list in defined event-channel.
+  	  * :white_check_mark: **Dynamic seating map:** Generate dynamic seating map in the participants channel and during user seat registration.
+  	  * :calendar: **Reserves list:** Add users to an event reserveslist when participant seat limit is reached.
+    * :white_check_mark: **Edit user details**
+    * :white_check_mark: **Remove users from events**
+    * :white_check_mark: **List users in events**
 
 
 - **User Commands**:
-	* :calendar: Registration: *Commands for users to register and unregister to events*
+	* :white_check_mark: **Register for event:** *Command for users to signup to events*
+	* :white_check_mark: **Edit registration:** *Functionality for users to edit their own user and event registration details (built into the register command)*
+	* :calendar: **Unregister from event:** *Command for users to leave/remove themselves from an event*
 
 
-## Prerequisites *(In-progress)*
-* **Node.js (tested on v20.5.1)**: <br>The bot runs on Node.js. You need to have it installed to run the bot. If you haven't installed it yet, download and install it from <a href="https://nodejs.org/en">Node.js official website</a>.
-
-
-## Installation
+#
+### Installation
 
 1. Clone the repository:
    ```bash
@@ -53,11 +54,10 @@ This bot was developed for a specific, personal project and is made public for r
    ```bash
    npm install
    ```
-4. Set up the bot in the discord developer portal.<br>
-Here is a good guide from the <a href="https://discordjs.guide/preparations/setting-up-a-bot-application.html">discord.js website</a>
-
+4. Set up the bot in the discord developer portal:
+   https://discordjs.guide/preparations/setting-up-a-bot-application.html
    
-5. Create a config.json file in the root directory of the bot and configure BOT_TOKEN, SERVER_ID (GUILD), CLIENT_ID (APPLICATION ID) and the BOT OWNER ID:
+5. Create a config.json file in the root directory and add BOT_TOKEN, SERVER_ID (GUILD), CLIENT_ID (APPLICATION ID) and the BOT OWNER ID:
    ```bash
    {
     "BOT_TOKEN":	"",
@@ -70,11 +70,16 @@ Here is a good guide from the <a href="https://discordjs.guide/preparations/sett
    ```bash
    node app.js
    ```
-   
-## Usage *(In-progress)*
+#   
+### Usage *(In-progress)*
 
 | Command | Description | Example |
 | ------- | ----------- | ------- |
-| `/command1` | Description1 | `/command1 <subcommand> <value>` |
-| `/command2` | Description2 | `/command2 <subcommand> <value>` |
-| ...      | ...         | ...     |
+| `/adminget <setting>` | .... | `....` |
+| `/adminset <setting> <value>` | .... | `....` |
+| `/adminadd <event|user>` | .... | `....` |
+| `/adminedit <event|user|eventuser>` | .... | `....` |
+| `/admindel <event|user>` | .... | `....` |
+| `/adminlist <events|users>` | .... | `....` |
+| `/register <event>` | .... | `....` |
+| ....      | ....         | ....     |

@@ -13,11 +13,13 @@ module.exports = (sequelize) => {
             },
             discorduser: {
                 type: DataTypes.STRING,
-                allowNull: false
+                allowNull: false,
+                unique: true
             },
             nickname: {
                 type: DataTypes.STRING,
-                allowNull: false
+                allowNull: false,
+                unique: true
             },
             firstname: {
                 type: DataTypes.STRING,

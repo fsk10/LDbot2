@@ -53,10 +53,16 @@ const commandData = new SlashCommandBuilder()
                 }
     
                 if (!isValid) {
-                    interaction.reply({ content: `The ID provided is neither a valid role nor a channel. Please provide a valid role or channel ID.`, ephemeral: true });
+                    interaction.reply({ 
+                        content: `The ID provided is neither a valid role nor a channel. Please provide a valid role or channel ID.`, 
+                        ephemeral: true 
+                    });
                     return;
                 } else {
-                    interaction.reply({ content: `The provided value is not a recognized format. Please provide a valid role or channel ID.`, ephemeral: true });
+                    interaction.reply({ 
+                        content: `The provided value is not a recognized format. Please provide a valid role or channel ID.`, 
+                        ephemeral: true 
+                    });
                     return;
                 }
             }
@@ -66,12 +72,21 @@ const commandData = new SlashCommandBuilder()
             const result = await setSetting(settingName, processedValue);
             if (result.success) {
                 logActivity(client, `Setting **${settingName}** changed to ${value} by ${interaction.user.tag}`);
-                interaction.reply({ content: `Setting **${settingName}** has been updated to: ${value}`, ephemeral: true });
+                interaction.reply({ 
+                    content: `Setting **${settingName}** has been updated to: ${value}`, 
+                    ephemeral: true 
+                });
             } else {
-                interaction.reply({ content: `Error updating setting: ${result.message}`, ephemeral: true });
+                interaction.reply({ 
+                    content: `Error updating setting: ${result.message}`, 
+                    ephemeral: true 
+                });
             }
         } catch (error) {
-            interaction.reply({ content: error.message, ephemeral: true });
+            interaction.reply({ 
+                content: error.message, 
+                ephemeral: true 
+            });
         }
     }
     

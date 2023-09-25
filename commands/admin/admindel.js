@@ -1,6 +1,6 @@
 const { SlashCommandBuilder } = require('@discordjs/builders');
 const { isAdmin } = require('../../utils/permissions');
-const { deleteEvent, deleteUserFromEvent, listEvents, listUsers } = require('../../database/operations');
+const { deleteEvent, deleteUserFromEvent, listEvents, listUsers, deleteUserCompletely } = require('../../database/operations');
 const logActivity = require('../../utils/logActivity');
 
 const commandData = new SlashCommandBuilder()
@@ -13,19 +13,22 @@ const commandData = new SlashCommandBuilder()
                 option.setName('eventname')
                     .setDescription('Name of the event to delete')
                     .setRequired(true)
+                    .setAutocomplete(true)
             ))
     .addSubcommand(subcommand => 
         subcommand.setName('user')
             .setDescription('Delete a user from an event')
             .addStringOption(option => 
-                option.setName('username')
+                option.setName('nickname')
                     .setDescription('Name of the user to delete')
                     .setRequired(true)
+                    .setAutocomplete(true)
             )
             .addStringOption(option => 
                 option.setName('eventname')
                     .setDescription('Name of the event')
-                    .setRequired(true)
+                    .setRequired(false)
+                    .setAutocomplete(true)
             ));
 
 async function execute(interaction, client) {
@@ -42,15 +45,15 @@ async function execute(interaction, client) {
     const subcommand = interaction.options.getSubcommand();
 
     if (subcommand === 'event') {
-        const eventName = interaction.options.getString('eventname');
-        const result = await deleteEvent(eventName);
-
+        const eventId = interaction.options.getString('eventname');
+        const result = await deleteEvent(eventId);
+    
         if (result.success) {
-            logActivity(client, `Event **${eventName}** has been deleted by ${interaction.user.tag}`);
+            logActivity(client, `Event **${result.eventName}** has been deleted by ${interaction.user.tag}`);
             await interaction.reply({
-				content: `Event **${eventName}** has been deleted.`,
-				ephemeral: true
-		});
+                content: `Event **${result.eventName}** has been deleted.`,
+                ephemeral: true
+            });
         } else {
             await interaction.reply({
                 content: result.error,
@@ -58,21 +61,39 @@ async function execute(interaction, client) {
             });
         }
     } else if (subcommand === 'user') {
-        const username = interaction.options.getString('username');
-        const eventName = interaction.options.getString('eventname');
-        const result = await deleteUserFromEvent(username, eventName);
+        const nickname = interaction.options.getString('nickname');
+        const eventId = interaction.options.getString('eventname');
 
-        if (result.success) {
-            logActivity(client, `User **${username}** has been removed from the event **${eventName}** by ${interaction.user.tag}`);
-            await interaction.reply({
-				content: `User **${username}** has been removed from the event **${eventName}**.`,
-				ephemeral: true
-			});
+        // Check if the eventId is provided
+        if (eventId) {
+            const result = await deleteUserFromEvent(nickname, eventId, client);
+            if (result.success) {
+                logActivity(client, `User **${nickname}** has been removed from the event **${eventId}** by ${interaction.user.tag}`);
+                await interaction.reply({
+				    content: `User **${nickname}** has been removed from the event **${eventId}**.`,
+				    ephemeral: true
+			    });
+            } else {
+                await interaction.reply({
+                    content: result.error,
+                    ephemeral: true
+                });
+            }
         } else {
-            await interaction.reply({
-                content: result.error,
-                ephemeral: true
-            });
+            // Handle complete user deletion logic here
+            const result = await deleteUserCompletely(nickname, client);
+            if (result.success) {
+                logActivity(client, `User **${nickname}** has been completely deleted by ${interaction.user.tag}`);
+                await interaction.reply({
+				    content: `User **${nickname}** has been completely deleted.`,
+				    ephemeral: true
+			    });
+            } else {
+                await interaction.reply({
+                    content: result.error,
+                    ephemeral: true
+                });
+            }
         }
     }
 }
@@ -84,26 +105,26 @@ async function prepare() {
     const eventSubcommand = commandData.options.find(option => option.name === 'event');
     const userSubcommand = commandData.options.find(option => option.name === 'user');
     
-    // Populate dynamic choices for events and users in the event subcommand
-    const eventNameOptionForEvent = eventSubcommand.options.find(option => option.name === 'eventname');
-    eventNameOptionForEvent.choices = events.map(event => ({
-        name: event.name,
-        value: event.name
-    }));
+    // // Populate dynamic choices for events and users in the event subcommand
+    // const eventIdOptionForEvent = eventSubcommand.options.find(option => option.name === 'eventname');
+    // eventIdOptionForEvent.choices = events.map(event => ({
+    //     name: event.name,
+    //     value: event.name
+    // }));
     
-    // Populate dynamic choices for username in the user subcommand
-    const usernameOption = userSubcommand.options.find(option => option.name === 'username');
-    usernameOption.choices = users.map(user => ({
-        name: user.nickname,
-        value: user.nickname
-    }));
+    // // Populate dynamic choices for nickname in the user subcommand
+    // const nicknameOption = userSubcommand.options.find(option => option.name === 'nickname');
+    // nicknameOption.choices = users.map(user => ({
+    //     name: user.nickname,
+    //     value: user.nickname
+    // }));
 
-    // Populate dynamic choices for eventname in the user subcommand
-    const eventNameOptionForUser = userSubcommand.options.find(option => option.name === 'eventname');
-    eventNameOptionForUser.choices = events.map(event => ({
-        name: event.name,
-        value: event.name
-    }));
+    // // Populate dynamic choices for eventname in the user subcommand
+    // const eventIdOptionForUser = userSubcommand.options.find(option => option.name === 'eventname');
+    // eventIdOptionForUser.choices = events.map(event => ({
+    //     name: event.name,
+    //     value: event.name
+    // }));
 
     return commandData;
 }

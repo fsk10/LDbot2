@@ -7,6 +7,14 @@
  @description: LANet Deluxe event-bot
 */
 
+for (const module in require.cache) {
+    if (require.cache[module].id.endsWith('.js')) {
+        delete require.cache[module];
+    }
+}
+
+global.ongoingRegistrations = {};
+
 const fs = require('node:fs');
 const path = require('node:path');
 const logger = require('./utils/logger');
@@ -14,6 +22,11 @@ const { Client, Collection, Events, GatewayIntentBits } = require('discord.js');
 const { BOT_TOKEN } = require('./config.json');
 const { initializeDatabase } = require('./database/database');
 const deployCommands = require('./deploy-commands');
+const cron = require('node-cron');
+const { releaseUnconfirmedSeats } = require('./database/operations');
+
+// Run every 10 minutes
+cron.schedule('*/10 * * * *', releaseUnconfirmedSeats);
 
 const client = new Client({
   intents: [
@@ -21,6 +34,7 @@ const client = new Client({
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildMembers,
+	GatewayIntentBits.DirectMessages,
   ],
 })
 

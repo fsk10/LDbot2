@@ -1,7 +1,13 @@
-const { EventModel, UserModel, SettingsModel, EventUsersModel } = require('../models/index.js');
+const { EmbedBuilder } = require('discord.js');
+const { EventModel, UserModel, SettingsModel, EventUsersModel, TemporaryRegistration } = require('../models/index.js');
+const { Op } = require('sequelize');
+const { sequelize } = require('../database/database');
 const settingsConfig = require('../config/settingsConfig');  
 const defaultSettings = Object.keys(settingsConfig);
 const logger = require('../utils/logger');
+const Jimp = require('jimp');
+const fs = require('fs').promises;
+const path = require('path');
 
 // Creates a new event in the database.
 async function addEvent(eventData) {
@@ -15,9 +21,9 @@ async function addEvent(eventData) {
 }
 
 // Adds a user to an event in the database.
-async function addUser(userData) {
+async function addUser(userData, client) {
     try {
-        // Step 1: Check if the User Exists
+        // Check if the User Exists
         let user = await UserModel.findOne({ where: { discorduser: userData.discorduser } });
 
         // If user doesn't exist, create one
@@ -32,8 +38,8 @@ async function addUser(userData) {
             });
         }
 
-        // Step 2: Add or Update Association in EventUsers Table
-        const eventUserAssociation = await EventUsersModel.findOne({
+        // Add or Update Association in EventUsers Table
+        let eventUserAssociation = await EventUsersModel.findOne({
             where: {
                 userId: user.id,
                 eventId: userData.event
@@ -44,17 +50,24 @@ async function addUser(userData) {
             // Update the existing association with new event-specific data
             eventUserAssociation.seat = userData.seat;
             eventUserAssociation.haspaid = userData.haspaid;
-            // Update any other event-specific fields as needed
-            await eventUserAssociation.save();
+            if (userData.haspaid) {
+                eventUserAssociation.paidAt = new Date();
+            }
         } else {
             // Create a new association
-            await EventUsersModel.create({
+            eventUserAssociation = await EventUsersModel.create({
                 userId: user.id,
                 eventId: userData.event,
                 seat: userData.seat,
                 haspaid: userData.haspaid,
-                // Add any other event-specific fields as needed
+                paidAt: userData.haspaid ? new Date() : null
             });
+        }
+
+        await eventUserAssociation.save();
+        
+        if (userData.haspaid) {
+            await updateParticipantList(client, userData.event);
         }
 
         return { success: true, user: user };
@@ -71,28 +84,145 @@ async function addUser(userData) {
     }
 }
 
+// Update event-data
+async function updateEvent(eventId, updatedFields) {
+    try {
+        // Extract only the numeric ID from the channel mention format
+        const channelMention = updatedFields.participantchannel;
+        if (channelMention) {
+            const channelId = channelMention.match(/\d+/)[0];
+            updatedFields.participantchannel = channelId;
+        }
+
+        const result = await EventModel.update(updatedFields, {
+            where: { id: eventId }
+        });
+
+        if (result[0] > 0) {
+            return { success: true };
+        } else {
+            return { success: false, message: 'Event not found or no fields updated.' };
+        }
+    } catch (error) {
+        logger.error('Error updating event:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+
+// Update data for a user
+async function updateUser(nickname, updatedFields) {
+    try {
+        const user = await UserModel.findOne({ where: { nickname: nickname } });
+        if (!user) {
+            logger.error(`User with nickname "${nickname}" not found.`);
+            return { success: false, message: `User "${nickname}" not found.` };
+        }
+
+        const result = await UserModel.update(updatedFields, {
+            where: { id: user.id }
+        });
+
+        if (result[0] > 0) {
+            return { success: true };
+        } else {
+            logger.error(`No fields were updated for user: ${nickname}`);
+            return { success: false, message: 'No fields updated.' };
+        }
+    } catch (error) {
+        logger.error(`Error updating user with nickname ${nickname}: ${error.message}`);
+        return { success: false, error: error.message };
+    }
+}
+
+// Update event-data for a user
+async function updateEventUser(eventId, userId, updatedFields, client) {
+    try {
+        // If haspaid is being updated, also update the paidAt timestamp
+        if ('haspaid' in updatedFields && updatedFields.haspaid) {
+            updatedFields.paidAt = new Date();
+        }
+
+        const result = await EventUsersModel.update(updatedFields, {
+            where: { 
+                eventId: eventId,
+                userId: userId
+            }
+        });
+
+        if (result[0] > 0) {
+            let shouldUpdateParticipantList = false;
+
+            // If haspaid is being updated
+            if ('haspaid' in updatedFields) {
+                shouldUpdateParticipantList = true;
+            }
+
+            // If seat is being updated, we should fetch the haspaid value for the user
+            if ('seat' in updatedFields) {
+                const userEventDetails = await EventUsersModel.findOne({
+                    where: { 
+                        eventId: eventId,
+                        userId: userId
+                    }
+                });
+                
+                if (userEventDetails && userEventDetails.haspaid) {
+                    shouldUpdateParticipantList = true;
+                }
+            }
+
+            // Update the participant list if necessary
+            if (shouldUpdateParticipantList) {
+                await updateParticipantList(client, eventId);
+            }
+
+            return { success: true };
+        } else {
+            return { success: false, message: 'Event-user relation not found or no fields updated.' };
+        }
+    } catch (error) {
+        logger.error(`Error updating event-user relation with eventId: ${eventId}, userId: ${userId}: ${error.message}`);
+        return { success: false, error: error.message };
+    }
+}
+
+
 // Delete an entire event
-async function deleteEvent(eventName) {
+async function deleteEvent(eventId) {
+    // Fetch the event first
+    const event = await EventModel.findOne({ where: { id: eventId } });
+
+    // If the event doesn't exist, return an error
+    if (!event) {
+        return { success: false, error: `Event with ID "${eventId}" does not exist.` };
+    }
+
+    // Store the event's name for user-friendly messages
+    const eventName = event.name;
+
+    // Attempt to delete the event
     const result = await EventModel.destroy({
         where: {
-            name: eventName
+            id: eventId
         }
     });
 
     if (result === 0) {
-        return { success: false, error: `Event "${eventName}" does not exist.` };
+        return { success: false, error: `Failed to delete event "${eventName}".` };
     }
 
-    return { success: true };
+    return { success: true, eventName: eventName };
 }
 
+
 // Delete a user from an event
-async function deleteUserFromEvent(username, eventName) {
-    const user = await UserModel.findOne({ where: { nickname: username } });
-    const event = await EventModel.findOne({ where: { name: eventName } });
-    
+async function deleteUserFromEvent(nickname, eventName, client) {
+    const user = await UserModel.findOne({ where: { nickname: nickname } });
+    const event = await EventModel.findByPk(eventName);
+
     if (!user) {
-        return { success: false, error: `User "${username}" does not exist.` };
+        return { success: false, error: `User "${nickname}" does not exist.` };
     }
     
     if (!event) {
@@ -101,16 +231,54 @@ async function deleteUserFromEvent(username, eventName) {
 
     const result = await user.removeEvent(event);
     if (result === 0) {
-        return { success: false, error: `User "${username}" is not associated with the event "${eventName}".` };
+        return { success: false, error: `User "${nickname}" is not associated with the event "${eventName}".` };
     }
 
+    // Update the participant list for the event after removing the user.
+    await updateParticipantList(client, event.id);
+
     return { success: true };
+}
+
+// Delete a user from the database completely
+async function deleteUserCompletely(nickname, client) {
+    try {
+        // Find the user based on the nickname
+        const user = await UserModel.findOne({ 
+            where: { nickname: nickname },
+            include: { model: EventModel, as: 'events' }  // Fetch associated events
+        });
+
+        if (!user) {
+            return { success: false, message: `User with nickname "${nickname}" not found.` };
+        }
+
+        // Delete the user's associations with events
+        await EventUsersModel.destroy({
+            where: { userId: user.id }
+        });
+
+        // Update participant list for each event the user was associated with.
+        for (const event of user.events) {
+            await updateParticipantList(client, event.id);
+        }
+
+        // Delete the user from the users table
+        await UserModel.destroy({
+            where: { id: user.id }
+        });
+
+        return { success: true };
+
+    } catch (error) {
+        logger.error('Error deleting user:', error);
+        return { success: false, error: error.message };
+    }
 }
 
 
 // Associate user to event
 async function associateUserToEvent(userId, eventId) {
-    logger.info(`Associating userId: ${userId} with eventId: ${eventId}`);
     try {
         await EventUsersModel.create({
             userId: userId,
@@ -123,14 +291,11 @@ async function associateUserToEvent(userId, eventId) {
     }
 }
 
-
 // Get a specific setting
 async function getSetting(key) {
-    logger.info(`Attempting to get setting with key: ${key}`);  // Log the key being retrieved
     try {
         const setting = await SettingsModel.findOne({ where: { key } });
         if (setting) {
-	    logger.info(`Fetched value for key ${key}: ${setting.value}`);
             return { success: true, value: setting.value };
         } else {
             logger.error(`Setting with key ${key} not found in the database`);  // Log if not found
@@ -155,11 +320,8 @@ async function setSetting(key, value) {
         const setting = await SettingsModel.findOne({ where: { key } });
 	
         if (setting) {
-	    logger.log(`Setting value in database for setting: ${key} with value: ${value}`);
-
             setting.value = value;
             await setting.save();
-	    logger.log(`Database operation complete.`);
             return { success: true, message: "Setting updated successfully." };
         } else {
             // Return error if the setting doesn't exist in the database
@@ -171,7 +333,7 @@ async function setSetting(key, value) {
     }
 }
 
-
+// List all users from an event
 async function listUsers(eventId) {
     if (eventId) {
         return await UserModel.findAll({
@@ -183,20 +345,61 @@ async function listUsers(eventId) {
             }]
         });
     } else {
-        return await UserModel.findAll();
+        // Fetch all users from the users table along with their associated events
+        return UserModel.findAll({
+            include: { model: EventModel, as: 'events' }
+        });
     }
 }
 
-
-
-const listEvents = async () => {
+async function listEventsForUser(discordUserId) {
     try {
-        return await EventModel.findAll();
+        const userWithEvents = await UserModel.findOne({
+            where: { discorduser: discordUserId },
+            include: [{ model: EventModel, as: 'events' }]
+        });        
+
+        if (!userWithEvents) {
+            logger.error(`User not found with ID: ${discordUserId}`);
+            return [];
+        }
+
+        if (!userWithEvents.events || userWithEvents.events.length === 0) {
+            logger.error(`No events found for the user with ID: ${discordUserId}`);
+            return [];
+        }
+
+        return userWithEvents.events; // This will give you an array of events associated with the user
     } catch (error) {
-        logger.error('Error fetching events:', error);
+        logger.error('Error listing events for user:', error);
         return [];
     }
-};
+}
+
+// List all events from the events table
+async function listEvents(options = {}) {
+    const { all = false, archived = false } = options;
+
+    if (all) {
+        return await EventModel.findAll();
+    } else if (archived) {
+        return await EventModel.findAll({
+            where: {
+                enddate: {
+                    [Op.lt]: new Date()
+                }
+            }
+        });
+    } else {
+        return await EventModel.findAll({
+            where: {
+                enddate: {
+                    [Op.gte]: new Date()
+                }
+            }
+        });
+    }
+}
 
 // Fetch event data based on ID
 async function getEvent(eventID) {
@@ -224,7 +427,6 @@ async function checkSeatTaken(eventID, seatNumber) {
     }
 }
 
-
 async function checkUserInEvent(discordUserId, eventId) {
     try {
         // Check the association table for the user-event combination
@@ -241,17 +443,394 @@ async function checkUserInEvent(discordUserId, eventId) {
     }
 }
 
+async function handleDatabaseOperations(interaction, collectedData, eventName) {
+	let user = await UserModel.findOne({ where: { discorduser: interaction.user.id } });
+
+	if (!user) {
+		user = await UserModel.create({
+			discorduser: interaction.user.id,
+			nickname: collectedData.nickname,
+			firstname: collectedData.firstname,
+			// ... Add other fields as necessary...
+		});
+	}
+
+	const event = await EventModel.findOne({ where: { name: eventName } });
+
+	await EventUsersModel.create({
+		userId: user.id,
+		eventId: event.id,
+		preferredseats: collectedData.preferredSeats
+		// ... Add other fields as necessary...
+	});
+}
+
+async function assignSeat(userId, eventId, preferredSeats) {
+    // Ensure the seat array is not empty
+    if (!preferredSeats || preferredSeats.length === 0) {
+        console.log("No preferred seats provided.");
+        return null;
+    }
+
+    // Check if the user exists in the `users` table or create a new record if they don't.
+    const tempUserDetails = await TemporaryRegistration.findOne({ where: { discorduser: userId } });
+    if (!tempUserDetails) {
+        console.error("Error fetching temporary registration details for user");
+        return null;
+    }
+
+    const [user, created] = await UserModel.findOrCreate({
+        where: { discorduser: userId },
+        defaults: {
+            discorduser: userId,
+            nickname: tempUserDetails.nickname,
+            firstname: tempUserDetails.firstname,
+            lastname: tempUserDetails.lastname,
+            email: tempUserDetails.email,
+            country: tempUserDetails.country
+        }
+    });
+
+    if (!user) {
+        console.error("Error creating or fetching user");
+        return null;
+    }
+
+    // Get the current seat of the user if they have one
+    const currentSeatRecord = await EventUsersModel.findOne({
+        where: {
+            userId: user.id,
+            eventId: eventId
+        }
+    });
+
+    const currentSeat = currentSeatRecord ? currentSeatRecord.seat : null;
+
+    // Loop through the preferred seats
+    for (let i = 0; i < preferredSeats.length; i++) {
+        let seat = preferredSeats[i];
+
+        // Check if the seat is available or is the current seat of the user
+        const seatTaken = await EventUsersModel.findOne({ 
+            where: { 
+                eventId: eventId,
+                seat: seat 
+            } 
+        });
+
+        if (!seatTaken || seat === currentSeat) {
+            // If seat is available or is the current seat of the user, assign it
+            console.log(`Seat ${seat} is available or is current seat. Assigning to userId: ${user.id}`);
+
+            const userEventRecord = await EventUsersModel.findOne({
+                where: {
+                    userId: user.id,
+                    eventId: eventId
+                }
+            });
+
+            if (userEventRecord) {
+                userEventRecord.seat = seat;
+                await userEventRecord.save();
+                return seat;
+            } else {
+                try {
+                    await EventUsersModel.create({
+                        userId: user.id,
+                        eventId: eventId,
+                        seat: seat,
+                        haspaid: false,
+                        status: 'unconfirmed'
+                    });
+                    return seat;
+                } catch (error) {
+                    console.error("Error assigning seat:", error);
+                    if (error instanceof Sequelize.ValidationError) {
+                        for (const validationErrorItem of error.errors) {
+                            console.error(`Validation error on field ${validationErrorItem.path}: ${validationErrorItem.message}`);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    console.log("All preferred seats are taken.");
+    return null;
+}
+
+async function releaseUnconfirmedSeats() {
+    const expiryTime = 10 * 60 * 1000; // 10 minutes in milliseconds
+    const expiredTimestamp = new Date(Date.now() - expiryTime);
+
+    await EventUsersModel.update({ 
+        status: 'available' 
+    }, { 
+        where: { 
+            status: 'reserved',
+            updatedAt: { [Sequelize.Op.lte]: expiredTimestamp }
+        } 
+    });
+}
+
+async function updateSeatingMap(occupiedSeats) {
+    const image = await Jimp.read('./images/SeatingMap.png');
+    const font = await Jimp.loadFont(Jimp.FONT_SANS_16_BLACK);
+
+    // Create a semi-transparent rectangle
+    const takenRectangle = new Jimp(40, 39, 'rgba(230, 20, 20, 0.5)');
+    const pendingRectangle = new Jimp(40, 39, 'rgba(255, 160, 0, 0.5)');
+
+    occupiedSeats.forEach(seat => {
+        const { seatNumber, nickname, hasPaid } = seat;
+        const seatCoord = getSeatCoordinates(seatNumber);
+
+        // Decide which rectangle to use based on the hasPaid field
+        const rectangleToUse = hasPaid ? takenRectangle : pendingRectangle;
+
+        // Composite the transparent rectangle onto the main image
+        image.composite(rectangleToUse, seatCoord.x + 1, seatCoord.y + 3);
+
+        // Print nickname
+        const truncatedNickname = truncateNickname(nickname);
+        const nicknameCoord = getNicknameCoordinates(seatNumber, truncatedNickname, font);
+
+        image.print(font, nicknameCoord.x, nicknameCoord.y, truncatedNickname);
+
+    });
+
+    await image.writeAsync('./images/UpdatedSeatingMap.png');
+}
+
+function getSeatCoordinates(seatNumber) {
+    const baseX = seatNumber <= 20 ? 210 : 462; // Decide the base X based on the seat number
+    const baseY = 192;
+
+    let row, col;
+    if (seatNumber % 2 === 0) {
+        col = 1;  // second column
+        row = (seatNumber / 2 - 1) % 10;  // Using modulo 10 to make sure it wraps around after reaching 10
+    } else {
+        col = 0;  // first column
+        row = ((seatNumber + 1) / 2 - 1) % 10;  // Using modulo 10 here as well
+    }
+
+    // Calculate the X and Y coordinates based on the seat's position in the grid
+    const x = baseX + col * 42;
+    const y = baseY + row * 42;
+
+    return { x, y };
+}
+
+function getNicknameCoordinates(seatNumber, truncatedNickname, font) {
+    const seatCoord = getSeatCoordinates(seatNumber);
+    const nicknameWidth = Jimp.measureText(font, truncatedNickname);
+    const padding = 5;  // This value can be adjusted as per your needs
+
+    let x, y;
+
+    if (seatNumber % 2 === 1) { // odd seats (left column)
+        x = seatCoord.x - nicknameWidth - padding; 
+        y = seatCoord.y + 24;
+    } else { // even seats (right column)
+        x = seatCoord.x + 46; 
+        y = seatCoord.y + 6; 
+    }
+
+    return { x, y };
+}
+
+async function fetchOccupiedSeatsForEvent(eventID) {
+    try {
+        const occupiedSeats = await EventUsersModel.findAll({
+            where: {
+                eventId: eventID,
+                seat: {
+                    [Op.ne]: null  // Make sure the seat is not null
+                }
+            },
+            include: {
+                model: UserModel,
+                as: 'user',
+                attributes: ['nickname']  // Only fetch the nickname
+            }
+        });
+
+        // Transform the results to an array of { seatNumber, nickname }
+        return occupiedSeats.map(record => ({
+            seatNumber: record.seat,
+            nickname: record.user.nickname,
+            hasPaid: record.haspaid
+        }));
+    } catch (error) {
+        console.error('Error fetching occupied seats:', error);
+        return [];
+    }
+}
+
+async function generateCurrentSeatingMap(eventID) {
+    const occupiedSeats = await fetchOccupiedSeatsForEvent(eventID);
+    await updateSeatingMap(occupiedSeats);
+    
+    // Read the image into a buffer and return the buffer
+    return await fs.readFile('./images/UpdatedLDSeatingMapV4.png');
+}
+
+function truncateNickname(nickname) {
+    const truncated = nickname.length > 12 ? nickname.substring(0, 10) + '..' : nickname;
+    return truncated;
+}
+
+async function createEventEmbed(eventId) {
+    try {
+        const event = await EventModel.findByPk(eventId, {
+            include: [{
+                model: UserModel,
+                as: 'users',
+                through: { where: { haspaid: true } },
+                required: false
+            }]
+        });
+
+        const embed = new EmbedBuilder()
+            .setTitle(`Participants for ${event.name}`)
+            .setColor('#0099ff')
+            .setDescription(event.users.map(user => user.nickname).join('\n'));
+
+        return embed;
+    } catch (error) {
+        logger.error(`Error creating embed for eventId ${eventId}:`, error);
+        return null; // or however you want to handle this
+    }
+}
+
+async function updateParticipantList(client, eventId) {
+    try {
+        const event = await EventModel.findByPk(eventId, {
+            include: [{
+                model: UserModel,
+                as: 'users',
+                through: { where: { haspaid: true }, order: [['paidAt', 'ASC']] },
+                required: false
+            }]
+        });
+
+        // Constructing the embed description dynamically
+        let embedDescription = "**#** **| Country | Nick | Seat**\n";
+
+        const DESIRED_NICKNAME_LENGTH = 18;
+
+        let invalidUsers = 0;
+        event.users.forEach(user => {
+            if (!user.EventUsers || !user.EventUsers.paidAt) {
+                invalidUsers++;
+                console.error(`User ${user.nickname} has invalid EventUsers data`);
+            }
+        });
+        if (invalidUsers > 0) {
+            console.error(`${invalidUsers} users have invalid data. Stopping further processing.`);
+            return;
+        }
+
+        event.users.sort((a, b) => new Date(a.EventUsers.paidAt) - new Date(b.EventUsers.paidAt)).forEach((user, index) => {
+            try {
+                const number = String(index + 1).padStart(2, '0');
+                const flagEmoji = `:flag_${user.country.toLowerCase()}:`;
+
+                // Check if EventUsers is defined for the user
+                if (user.EventUsers) {
+                    // Compute the padding needed for this nickname
+                    const computedPadding = DESIRED_NICKNAME_LENGTH - user.nickname.length;
+                    const padding = ' '.repeat(Math.max(0, computedPadding));
+                    embedDescription += `\` ${number} \` ${flagEmoji} \` ${user.nickname} ${padding}\` (**${user.EventUsers.seat}**)\n`;
+                } else {
+                    logger.warn(`EventUsers association missing for user: ${user.nickname}`);
+                }
+
+            } catch (err) {
+            console.error(`Error processing user with nickname: ${user.nickname}. Error: ${err.message}`);
+            }
+        });
+
+        const matchResult = event.participantchannel.match(/\d+/);
+        if (!matchResult || matchResult.length === 0) {
+            console.error(`Failed to extract channel ID from ${event.participantchannel}`);
+            return;
+        }
+        const channelId = matchResult[0];
+        const channel = client.channels.cache.get(channelId);
+        if (!channel) {
+            logger.error(`Channel with ID ${event.participantchannel} not found or not accessible.`);
+            return;
+        }
+
+        if (channel.type !== 0) {
+            logger.error(`Channel with ID ${channel.id} is not a text channel.`);
+            return;
+        }
+
+        // Fetch and bulk delete all messages in the channel
+        const fetchedMessages = await channel.messages.fetch({ limit: 100 });
+        if (fetchedMessages.size > 0) {
+            try {
+                await channel.bulkDelete(fetchedMessages);
+            } catch (error) {
+                console.error(`Failed to bulk delete messages. Error: ${error.message}`);
+            }
+        }
+
+        // Generate and send the seating map
+        const seatingMapBuffer = await generateCurrentSeatingMap(eventId);
+        await channel.send({
+            files: [{
+                attachment: seatingMapBuffer,
+                name: 'seating-map.png'
+            }]
+        });
+
+        // Send the new embed
+        const embed = {
+            title: "**PARTICIPANT LIST**",
+            description: embedDescription,
+            color: 7907404,
+            footer: {
+                text: "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀"
+            }
+        };
+        channel.send({ embeds: [embed] });
+
+    } catch (error) {
+        logger.error(`Error updating participant list for eventId ${eventId}:`, error);
+    }
+}
+
 module.exports = {
   addEvent,
   addUser,
   getSetting,
   setSetting,
   listUsers,
+  listEventsForUser,
   listEvents,
   getEvent,
   checkSeatTaken,
   checkUserInEvent,
   associateUserToEvent,
   deleteEvent,
-  deleteUserFromEvent
+  deleteUserFromEvent,
+  deleteUserCompletely,
+  updateEvent,
+  updateUser,
+  updateEventUser,
+  handleDatabaseOperations,
+  assignSeat,
+  releaseUnconfirmedSeats,
+  updateSeatingMap,
+  getSeatCoordinates,
+  getNicknameCoordinates,
+  fetchOccupiedSeatsForEvent,
+  generateCurrentSeatingMap,
+  truncateNickname,
+  updateParticipantList,
+  createEventEmbed
 };

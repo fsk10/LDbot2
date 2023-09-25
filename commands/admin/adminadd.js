@@ -1,6 +1,6 @@
 const { SlashCommandBuilder } = require('@discordjs/builders');
 const logger = require('../../utils/logger');
-const { addEvent, addUser, getEvent, checkSeatTaken, listEvents, checkUserInEvent, associateUserToEvent } = require('../../database/operations');
+const { addEvent, addUser, getEvent, checkSeatTaken, listEvents, checkUserInEvent, updateParticipantList } = require('../../database/operations');
 const options = require('../../config/adminAddConfig');
 const countryList = require('../../config/countryList');
 const extractOption = require('../../utils/extractOption');
@@ -84,9 +84,13 @@ async function execute(interaction, client) {
 
 	if (subcommand === 'event') {
 		try {
+			let eventData = {};
+
+			// Extracting the start and end dates from the interaction
 			const startDateStr = interaction.options.getString('startdate');
 			const endDateStr = interaction.options.getString('enddate');
 
+			// Check if the provided dates are in a valid format
 			if (!isValidDateTime(startDateStr) || !isValidDateTime(endDateStr)) {
 				return await interaction.reply({
 					content: 'Invalid date-time format. Please use the format YYYY-MM-DD HH:mm.',
@@ -94,9 +98,11 @@ async function execute(interaction, client) {
 				});
 			}
 
+			// Convert string dates to JavaScript Date objects
 			const startDateObj = new Date(startDateStr);
 			const endDateObj = new Date(endDateStr);
 
+			// Ensure that the start date is before the end date
 			if (startDateObj > endDateObj) {
 				return await interaction.reply({
 					content: 'Start date cannot be after end date. Please correct the dates.',
@@ -104,18 +110,53 @@ async function execute(interaction, client) {
 				});
 			}
 
-			const eventData = {};
+			// Fetch the channel ID provided for participantchannel
+			const channelMention = interaction.options.getString('participantchannel');
+			if (channelMention) {
+				const channelIdMatch = channelMention.match(/<#(\d+)>/);
+				if (!channelIdMatch) {
+					return await interaction.reply({
+						content: `Invalid channel mention. Please provide a valid channel mention.`,
+						ephemeral: true
+					});
+				}
+
+				const channelId = channelIdMatch[1];
+				const channel = client.channels.cache.get(channelId);
+				if (!channel) {
+					logger.error(`Channel with ID ${channelId} not found in the cache.`);
+					return await interaction.reply({
+						content: `Invalid channel ID. Please provide a valid channel ID.`,
+						ephemeral: true
+					});
+				}
+
+				if (channel.type !== 0) {
+					return await interaction.reply({
+						content: `Invalid channel type. Expected GUILD_TEXT but found ${channel.type}.`,
+						ephemeral: true
+					});
+				}
+
+				eventData['participantchannel'] = channelId;
+			} else {
+				eventData['participantchannel'] = null;
+			}
+	
+			// Extract all event data from the interaction options
 			for (let optionConfig of options[subcommand]) {
 				const optionName = optionConfig.name;
 				eventData[optionName] = extractOption(optionName, interaction, optionConfig.extractionMethod);
 			}
 
+			// Attempt to add the event to the database
 			const result = await addEvent(eventData);
+
 
 			if (result.success) {
 				logActivity(client, `Event **${eventData.name}** was added by ${interaction.user.tag}`);
 				await interaction.reply({
-					content: `Event ${eventData.name} added successfully!`,
+					content: `Event **${eventData.name}** added successfully!`,
 					ephemeral: true
 				});
 			} else {
@@ -141,7 +182,8 @@ async function execute(interaction, client) {
 			}
 
 			// Fetch the event
-			const event = await getEvent(userData.event);
+			const eventId = interaction.options.getInteger('event');
+			const event = await getEvent(eventId);
 			if (!event) {
 				return await interaction.reply({
 					content: 'The specified event does not exist.',
@@ -150,10 +192,10 @@ async function execute(interaction, client) {
 			}
 
 			// Check if user already exists in the event
-			const userExists = await checkUserInEvent(userData.discorduser, userData.event);
+			const userExists = await checkUserInEvent(userData.discorduser, eventId);
 			if (userExists) {
 				return await interaction.reply({
-					content: `User with ID ${userData.discorduser} is already registered for event ${userData.event}.`,
+					content: `User with ID ${userData.discorduser} is already registered for event ${event.name}.`,
 					ephemeral: true
 				});
 			}
@@ -167,7 +209,7 @@ async function execute(interaction, client) {
 			}
 	
 			// Check if the seat is already taken
-			const isSeatTaken = await checkSeatTaken(userData.event, userData.seat);
+			const isSeatTaken = await checkSeatTaken(eventId, userData.seat);
 			if (isSeatTaken) {
 				return await interaction.reply({
 					content: 'The specified seat is already taken for this event. Please choose a different seat.',
@@ -183,13 +225,14 @@ async function execute(interaction, client) {
 			}
 
 			// Add the user
-			const result = await addUser(userData);
+			const result = await addUser(userData, client);
 			if (result.success) {
 				logActivity(client, `User **${displayName}** (${userData.nickname}) was added to event **${event.name}** by ${interaction.user.tag}`);
 				await interaction.reply({
 					content: `User **${displayName}** (${userData.nickname}) was added successfully to event **${event.name}**!`,
 					ephemeral: true
 				});
+				await updateParticipantList(client, eventId);
 			} else {
 				// Use the error message returned by the addUser function
 				await interaction.reply({
@@ -198,9 +241,8 @@ async function execute(interaction, client) {
 				});
 			}
 
-
 		} catch (error) {
-			logger.info("Caught Error Message:", error.message);
+			logger.error("Caught Error Message:", error.message);
 			if (error.message === "A user with this email already exists.") {
 				await interaction.reply({
 					content: error.message,
@@ -227,7 +269,8 @@ async function prepare() {
     
     // Update event choices
     const eventOption = userSubcommand.options.find(option => option.name === 'event');
-    eventOption.choices = eventChoices;
+	eventOption.autocomplete = true;
+    // eventOption.choices = eventChoices;
 
     // Update country choices
     const countryOption = userSubcommand.options.find(option => option.name === 'country');

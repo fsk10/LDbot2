@@ -11,3 +11,7 @@ config.json
 # Logs
 logs/
 *.log
+
+# Images
+images/*
+!images/SeatingMap.png.EXAMPLE
