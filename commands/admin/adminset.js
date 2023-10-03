@@ -71,7 +71,7 @@ const commandData = new SlashCommandBuilder()
     
             const result = await setSetting(settingName, processedValue);
             if (result.success) {
-                logActivity(client, `Setting **${settingName}** changed to ${value} by ${interaction.user.tag}`);
+                logActivity(client, `Bot setting **${settingName}** changed to ${value} by [ **${interaction.user.tag}** ]`);
                 interaction.reply({ 
                     content: `Setting **${settingName}** has been updated to: ${value}`, 
                     ephemeral: true 

@@ -39,6 +39,11 @@ module.exports = (sequelize) => {
             type: Sequelize.STRING,
             allowNull: false,
             defaultValue: 'available'
+        },
+        reserve: {
+            type: DataTypes.BOOLEAN,
+            allowNull: false,
+            defaultValue: false
         }
     }, {
         sequelize,

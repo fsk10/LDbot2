@@ -1,9 +1,10 @@
-const { Events, EmbedBuilder } = require('discord.js');
+const { Events, EmbedBuilder, ActionRowBuilder, ButtonBuilder } = require('discord.js');
 const { Sequelize } = require('sequelize');
-const { listEvents, listUsers, listEventsForUser, generateCurrentSeatingMap, updateParticipantList } = require('../database/operations');
+const { listEvents, listUsers, listEventsForUser, generateCurrentSeatingMap, updateParticipantList, getAvailableSeatsForEvent } = require('../database/operations');
 const { UserModel, EventModel, EventUsersModel, TemporaryRegistration } = require('../models');
 const logger = require('../utils/logger');
 const countries = require('../config/countryList');
+const logActivity = require('../utils/logActivity');
 
 module.exports = {
 	name: Events.InteractionCreate,
@@ -19,10 +20,10 @@ module.exports = {
 			try {
 				await command.execute(interaction, interaction.client); 
 			} catch (error) {
-                console.error(`Error executing ${interaction.commandName}: ${error.message}`);
+                logger.error(`Error executing ${interaction.commandName}: ${error.message}`);
                 if (error instanceof Sequelize.ValidationError) {
                     for (const validationErrorItem of error.errors) {
-                        console.error(`Validation error on field ${validationErrorItem.path}: ${validationErrorItem.message}`);
+                        logger.error(`Validation error on field ${validationErrorItem.path}: ${validationErrorItem.message}`);
                     }
                 }
             }            
@@ -68,27 +69,100 @@ module.exports = {
                         }
                     }
                     break;
+                case 'adminannounce':
+                    if (focusedOptionName === 'event') {
+                        await handleEventAutocomplete(interaction);
+                    }
+                    break;
+                case 'unregister':
+                    if (focusedOptionName === 'event') {
+                        await handleUnregisterAutocomplete(interaction);
+                    }
+                    break;                   
             }
         }
 		
 		if (interaction.isButton()) {
 			let userId = interaction.user.id;
-			
+
+            // Check if the user exists in the ongoingRegistrations object
+            let ongoingRegistration = await TemporaryRegistration.findOne({ where: { discorduser: userId } });
+
+            const [action, eventToUnregisterFrom] = interaction.customId.split('-');
+            
             switch (interaction.customId) {
                 case 'registration_confirm':
-					// Clean up the ongoing registration data and send a feedback message
-					await TemporaryRegistration.destroy({ where: { discorduser: userId } });
+                    // Check if the ongoing registration exists
+                    if (!ongoingRegistration) {
+                        const regNoOngoingEmbed = new EmbedBuilder()
+                            .setTitle('No Registration In-Progress')
+                            .setDescription('No ongoing registration found. Please start the registration process again.')
+                            .setColor('#0089E4');
+                        await interaction.reply({ embeds: [regNoOngoingEmbed] });
+                        return;
+                    }
+                    // Clean up the ongoing registration data and send a feedback message
+                    await TemporaryRegistration.destroy({ where: { discorduser: userId } });
+                    ongoingRegistration = null;
                     break;
             }
 
-            // Check if the user exists in the ongoingRegistrations object
-            const ongoingRegistration = await TemporaryRegistration.findOne({ where: { discorduser: userId } });
-            
+            switch (action) {
+                case 'confirm_unregistration':
+                    try {
+                        // Use eventToUnregisterFrom directly instead of extracting it from the embed
+                        const user = await UserModel.findOne({ where: { discorduser: userId } });
+                        const event = await EventModel.findOne({ where: { name: eventToUnregisterFrom } });
+                        const userRegistration = await EventUsersModel.findOne({
+                            where: { userId: user.id, eventId: event.id }
+                        });
+                
+                        if (!userRegistration) {
+                            return interaction.update({ content: `You are not registered for the event "${eventToUnregisterFrom}".`, ephemeral: true, components: [] });
+                        }
+                
+                        // Unregister the user
+                        await userRegistration.destroy();
+                        interaction.update({ content: `You have been successfully unregistered from "${eventToUnregisterFrom}".`, ephemeral: true, components: [] });
+
+                        const originalEmbed = interaction.message.embeds[0];
+
+                        originalEmbed.setTitle("Registration Removed")
+                        originalEmbed.setDescription(`You have successfully removed yourself from the event!`)
+                        interaction.update({ embeds: [originalEmbed], components: [] });
+
+                    } catch (error) {
+                        logger.error(`Error executing /unregister: ${error.message}`);
+                        interaction.update({ content: 'An error occurred while processing your request.', ephemeral: true, components: [] });
+                    }
+                    return;
+                
+                case 'cancel_unregistration':
+                    const originalEmbed = interaction.message.embeds[0];
+
+                    originalEmbed.setTitle("Registration Still Active")
+                    originalEmbed.setDescription(`You have aborted your action to unregister from the event.`)
+                    interaction.update({ embeds: [originalEmbed], components: [] });
+                    return;
+            }
+
+
             if (!ongoingRegistration) {
                 if (interaction.customId === 'registration_confirm') {
-                    return interaction.reply({ content: 'No changes were made to your registration.', ephemeral: true });
+                    const regNoChangeEmbed = new EmbedBuilder()
+                        .setTitle('No Changes')
+                        .setDescription('No changes were made to your registration.')
+                        .setColor('#FFA500');
+                    await interaction.reply({ embeds: [regNoChangeEmbed] });
+                    return;
                 }
-                return interaction.reply({ content: "You've already completed or cancelled the registration process.", ephemeral: true });
+
+                const regAlreadyCancelledEmbed = new EmbedBuilder()
+                        .setTitle('Already Cancelled')
+                        .setDescription('You have already completed or cancelled the registration process.')
+                        .setColor('#0089E4');
+                    await interaction.reply({ embeds: [regAlreadyCancelledEmbed] });
+                    return;
             }
 
             switch (interaction.customId) {
@@ -101,6 +175,7 @@ module.exports = {
                     // Capture the original eventId and eventName
                     const { eventId: originalEventId, event: originalEventName } = ongoingRegistration.dataValues;
                     const existingUserDetails = await UserModel.findOne({ where: { discorduser: userId } });
+                    const eventUserDetails = await EventUsersModel.findOne({ where: { userId: existingUserDetails.id, eventId: originalEventId } });
 
                     if (existingUserDetails) {
                         // Update the ongoingRegistration directly
@@ -112,6 +187,7 @@ module.exports = {
                         ongoingRegistration.country = existingUserDetails.country;
                         ongoingRegistration.eventId = originalEventId;
                         ongoingRegistration.event = originalEventName;
+                        ongoingRegistration.reserve = eventUserDetails.reserve;
                 
                         // Save the updated registration
                         await ongoingRegistration.save();
@@ -123,15 +199,18 @@ module.exports = {
                     const regPrefSeatsEmbed = new EmbedBuilder()
                         .setTitle('Let\'s edit your registration')
                         .setDescription('Please provide your nickname.')
-                        .setColor('#2dcc20');
+                        .setColor('#0089E4');
                     await interaction.reply({ embeds: [regPrefSeatsEmbed] });
 
                     break;
 
                 case 'registration_continue':
+                    await interaction.deferReply({ ephemeral: true });
+                    
                     try {
                         // Insert/Update user details in UserModel
                         let user = await UserModel.findOne({ where: { discorduser: userId } });
+
                         if (user) {
                             user.nickname = ongoingRegistration.nickname;
                             user.firstname = ongoingRegistration.firstname;
@@ -150,7 +229,18 @@ module.exports = {
                             });
                         }
 
+                        const eventDetails = await EventModel.findByPk(ongoingRegistration.eventId);
+                        if (!eventDetails) {
+                            logger.error("No event details found for event ID", ongoingRegistration.eventId);
+                            return; 
+                        }
+
+                        // Re-fetch the ongoingRegistration object right here
+                        ongoingRegistration = await TemporaryRegistration.findOne({ where: { discorduser: userId } });
+
+                        let isReserve = ongoingRegistration.reserve;
                         const eventExists = await EventModel.findByPk(ongoingRegistration.eventId);
+
                         if (user && eventExists) {
                             try {
                                 const existingEventUser = await EventUsersModel.findOne({
@@ -163,52 +253,69 @@ module.exports = {
                                 if (existingEventUser) {
                                     await existingEventUser.update({
                                         seat: ongoingRegistration.seat,
-                                        status: 'confirmed'
+                                        status: 'confirmed',
+                                        reserve: isReserve
                                     });
                                 } else {
                                     await EventUsersModel.create({
                                         userId: user.id,
                                         eventId: ongoingRegistration.eventId,
                                         seat: ongoingRegistration.seat,
-                                        status: 'confirmed'
+                                        status: 'confirmed',
+                                        reserve: isReserve
                                     });
                                 }                                 
                             } catch (error) {
-                                console.error("Error inserting into EventUsersModel:", error);
+                                logger.error("Error inserting into EventUsersModel:", error);
                             }
                         } else {
-                            console.error(`User or Event does not exist. User: ${Boolean(user)}, Event: ${Boolean(eventExists)}`);
+                            logger.error(`User or Event does not exist. User: ${Boolean(user)}, Event: ${Boolean(eventExists)}`);
                         }
 
-                        // Cleanup the ongoing registration data
-                        await TemporaryRegistration.destroy({ where: { discorduser: userId } });
-                        await interaction.deferReply({ ephemeral: true });
-
-                        const eventDetails = await EventModel.findByPk(ongoingRegistration.eventId);
                         if (!eventDetails) {
                             throw new Error('Event not found for the given ID');
                         }
                         const eventName = eventDetails.name;
 
-                        // Sending the final registration and payment embeds
-                        const [registrationEmbed, paymentDetailsEmbed] = createConfirmationEmbeds({
-                            discorduser: interaction.user.tag, 
-                            nickname: ongoingRegistration.nickname, 
-                            firstname: ongoingRegistration.firstname,
-                            lastname: ongoingRegistration.lastname,
-                            email: ongoingRegistration.email,
-                            country: ongoingRegistration.country,
-                            seat: ongoingRegistration.seat,
-                            event: eventName
-                        });
-                        await interaction.user.send({ embeds: [registrationEmbed, paymentDetailsEmbed] });
+                        if (ongoingRegistration.reserve) {
+                            // User is on the reserve list. Create a different embed.
+                            const reservesRegistrationEmbed = createReserveEmbed({
+                                discorduser: interaction.user.tag, 
+                                nickname: ongoingRegistration.nickname, 
+                                firstname: ongoingRegistration.firstname,
+                                lastname: ongoingRegistration.lastname,
+                                email: ongoingRegistration.email,
+                                country: ongoingRegistration.country,
+                                event: eventName
+                            });
+                            await interaction.user.send({ embeds: reservesRegistrationEmbed });
+                        } else {
+                            // User is on the main list. Send the usual confirmation embeds.
+                            const [registrationEmbed, paymentDetailsEmbed] = createConfirmationEmbeds({
+                                discorduser: interaction.user.tag, 
+                                nickname: ongoingRegistration.nickname, 
+                                firstname: ongoingRegistration.firstname,
+                                lastname: ongoingRegistration.lastname,
+                                email: ongoingRegistration.email,
+                                country: ongoingRegistration.country,
+                                seat: ongoingRegistration.seat,
+                                event: eventName
+                            });
+                            await interaction.user.send({ embeds: [registrationEmbed, paymentDetailsEmbed] });
+                        }
 
                         // Update the seating map and participant list
                         await updateParticipantList(interaction.client, ongoingRegistration.eventId);
 
+                        // Log the successful registration
+                        logActivity(interaction.client, `User **${ongoingRegistration.nickname}** (${interaction.user.tag}) has successfully registered for the event **${eventName}**.`);
+
+                        // Cleanup the ongoing registration data
+                        await TemporaryRegistration.destroy({ where: { discorduser: userId } });
+
                     } catch (error) {
-                        console.error('Error finalizing registration:', error.message);
-                        await interaction.reply('There was an error finalizing your registration. Please try again later.');
+                        logger.error('Error finalizing registration:', error.message);
+                        await interaction.editReply('There was an error finalizing your registration. Please try again later.');
                     }
                     break;
                 
@@ -218,38 +325,100 @@ module.exports = {
                         await interaction.deferReply({ ephemeral: true });
                         ongoingRegistration.country = ongoingRegistration.unconfirmedCountry;
                         ongoingRegistration.unconfirmedCountry = null; // Clear the temporary field
-                        ongoingRegistration.stage = 'collectingPreferredSeats';
 
-                        try {
-                            await ongoingRegistration.save();
-                        } catch (error) {
-                            console.error("Error saving Temporary Registration:", error.message);
-                            await interaction.reply({ content: "An error occurred. Please try again later.", ephemeral: true });
-                            return;
-                        }
+                        // Check for available seats before proceeding
+                        const seatCheck = await getAvailableSeatsForEvent(ongoingRegistration.eventId, ongoingRegistration.discorduser);
+
+                        let isReserve = false;
                         
-                        // Generate the seating map and send to the user before asking for preferred seats.
-                        const tempReg = await TemporaryRegistration.findOne({ where: { discorduser: interaction.user.id } });
-
-                        try {
-                            const seatingMapBuffer = await generateCurrentSeatingMap(tempReg.eventId); 
-                            await interaction.user.send({
-                                files: [{
-                                    attachment: seatingMapBuffer,
-                                    name: 'seating-map.png'
-                                }],
-                                content: "Here's the current seating map. Please review it before providing your preferred seats:"
-                            });
-                        } catch (error) {
-                            console.error("Error generating seating map:", error);
-                            await interaction.user.send("An error occurred while generating the seating map. Continuing with registration...");
+                        // Check if the user was already a participant (not a reserve)
+                        if (ongoingRegistration && !ongoingRegistration.reserve) {
+                            isReserve = false;
+                        } else {
+                            // If not, then check for available seats
+                            if (!seatCheck.success || seatCheck.availableSeats <= 0) {
+                                isReserve = true;
+                            }
                         }
 
-                        const regPrefSeatsEmbed = new EmbedBuilder()
-                                .setTitle('Preferred Seats')
-                                .setDescription('Please provide your preferred seats for the event.\nFormated as a comma-separated list e.g. 3,11,29,...')
-                                .setColor('#2dcc20');
-                            await interaction.user.send({ embeds: [regPrefSeatsEmbed] });
+                        ongoingRegistration.reserve = isReserve;
+                        await TemporaryRegistration.update({ reserve: isReserve }, { where: { discorduser: userId } });
+
+                        // Fetch immediately after saving to see if it's saved correctly
+                        const checkRegistration = await TemporaryRegistration.findOne({ where: { discorduser: userId } });
+
+
+                        if (isReserve) {
+                            // User is on the reserve list.
+                            const user = interaction.client.users.cache.get(ongoingRegistration.discorduser);
+                            const username = user ? user.username : ongoingRegistration.discorduser; // use the ID as a fallback
+
+                            
+                            // Create the reserve registration confirmation embed
+                            const reserveConfirmationEmbed = new EmbedBuilder()
+                            .setTitle(`Hello ${username}!`)
+                            .setDescription(`**${seatCheck.eventName}** is currently at __MAX CAPACITY__.\n\nTo be added to the **__RESERVES LIST__** press **Continue** below.\nIf a seat becomes available you will be contacted by an admin!`)
+                            .setColor('#FFA500')
+                            .addFields(
+                                { name: 'Nickname', value: ongoingRegistration.nickname },
+                                { name: 'Firstname', value: ongoingRegistration.firstname },
+                                { name: 'Lastname', value: ongoingRegistration.lastname },
+                                { name: 'Email', value: ongoingRegistration.email },
+                                { name: 'Country', value: `:flag_${ongoingRegistration.country.toLowerCase()}:` }
+                            )
+                        
+                        // Create buttons (same as before)
+                        const row = new ActionRowBuilder()
+                            .addComponents(
+                                new ButtonBuilder()
+                                    .setCustomId('registration_cancel')
+                                    .setLabel('Cancel')
+                                    .setStyle(4),
+                                new ButtonBuilder()
+                                    .setCustomId('registration_edit')
+                                    .setLabel('Edit responses')
+                                    .setStyle(1),
+                                new ButtonBuilder()
+                                    .setCustomId('registration_continue')
+                                    .setLabel('Continue')
+                                    .setStyle(3)
+                            );
+
+                            ongoingRegistration.stage = 'showingReserveConfirmation';
+                            await ongoingRegistration.save();
+
+                            // Send the embed
+                            await interaction.user.send({ embeds: [reserveConfirmationEmbed], components: [row] });
+
+                        } else {
+                            // Seats are available, continue with the current flow
+                            ongoingRegistration.stage = 'collectingPreferredSeats';
+
+                            await ongoingRegistration.save();
+                        
+                            // Generate the seating map and send to the user before asking for preferred seats.
+                            const tempReg = await TemporaryRegistration.findOne({ where: { discorduser: interaction.user.id } });
+
+                            try {
+                                const seatingMapBuffer = await generateCurrentSeatingMap(tempReg.eventId); 
+                                await interaction.user.send({
+                                    files: [{
+                                        attachment: seatingMapBuffer,
+                                        name: 'seating-map.png'
+                                    }],
+                                    content: "Here's the current seating map. Please review it before providing your preferred seats:"
+                                });
+                            } catch (error) {
+                                logger.error("Error generating seating map:", error);
+                                await interaction.user.send("An error occurred while generating the seating map. Continuing with registration...");
+                            }
+
+                            const regPrefSeatsEmbed = new EmbedBuilder()
+                                    .setTitle('Preferred Seats')
+                                    .setDescription('Please provide your preferred seats for the event.\nFormated as a comma-separated list e.g. 3,11,29,...')
+                                    .setColor('#0089E4');
+                                await interaction.user.send({ embeds: [regPrefSeatsEmbed] });
+                        }      
                     } else {
                         await interaction.reply({ content: "Couldn't find your ongoing registration.", ephemeral: true });
                     }
@@ -265,21 +434,20 @@ module.exports = {
                         try {
                             await ongoingRegistration.save();
                         } catch (error) {
-                            console.error("Error saving Temporary Registration:", error.message);
+                            logger.error("Error saving Temporary Registration:", error.message);
                             await interaction.reply({ content: "An error occurred. Please try again later.", ephemeral: true });
                             return;
                         }
                         const regCountryEmbed = new EmbedBuilder()
                             .setTitle('Country')
                             .setDescription('Please provide your country of residence.\n\nUse a two letter country code [alpha-2-code] \nhttps://www.iban.com/country-codes')
-                            .setColor('#2dcc20');
+                            .setColor('#0089E4');
                         await interaction.user.send({ embeds: [regCountryEmbed] });
                         
                     } else {
                         await interaction.reply({ content: "Couldn't find your ongoing registration.", ephemeral: true });
                     }
-                    break;
-                    
+                    break;    
             }
         }
 	},
@@ -330,7 +498,7 @@ async function handleUserEventAutocomplete(interaction) {
         // Get the user's discord ID using the nickname
         const user = await UserModel.findOne({ where: { nickname: userNickname } });
         if (!user) {
-            logger.error('User not found:', userNickname);
+            logger.error(`User not found for nickname: ${userNickname}`);
             return await interaction.respond([]);
         }
 
@@ -338,10 +506,10 @@ async function handleUserEventAutocomplete(interaction) {
         const eventsForUser = await listEventsForUser(user.discorduser);
 
         if (!eventsForUser || eventsForUser.length === 0) {
-            logger.error('No events found for the user.');
+            logger.error(`No events found for user with nickname: ${userNickname}`);
             return await interaction.respond([]);
-        }
-
+        } 
+        
         // No need for further filtering as the list should contain only the events the user is a part of
         const eventSuggestions = eventsForUser
             .slice(0, 25)
@@ -352,6 +520,43 @@ async function handleUserEventAutocomplete(interaction) {
         logger.error(`Error handling autocomplete for "event" under "user": ${error.message}`);
         await interaction.respond([]);
     }
+}
+
+async function handleUnregisterAutocomplete(interaction) {
+    try {
+        const userId = interaction.user.id;
+
+        // Fetch the user's details
+        const user = await UserModel.findOne({ where: { discorduser: userId.toString() } });
+        if (!user) {
+            return;
+        }
+
+        // Fetch the list of events for which the user is registered
+        const registeredEvents = await user.getEvents();
+
+        const eventNames = registeredEvents.map(event => {
+            return { name: event.name, value: event.name };
+        });
+
+        // If there are no events to suggest, respond with a custom message
+        if (eventNames.length === 0) {
+            await interaction.respond([
+                {
+                    name: "You are not registered to any events",
+                    value: "no_match"
+                }
+            ]);
+            return;
+        }
+
+        // Respond with the list of events
+        if (Array.isArray(eventNames) && eventNames.length > 0) {
+            await interaction.respond(eventNames);
+        }
+    } catch (error) {
+        console.error('Error in handleUnregisterAutocomplete:', error.message, error.stack);
+    }    
 }
 
 async function handleEventUserNicknameAutocomplete(interaction) {
@@ -394,20 +599,32 @@ async function handleCountryAutocomplete(interaction) {
     }
 }
 
-function createConfirmationEmbeds(data) {
-	const fields = [
-		{ name: "Discord Username", value: data.discorduser || "Unknown" },
-		{ name: 'Nickname', value: data.nickname },
-		{ name: 'Firstname', value: data.firstname },
-		{ name: 'Lastname', value: data.lastname },
-		{ name: "Country", value: data.country },
-		{ name: "E-mail address", value: data.email },
-		{ name: "Assigned seat", value: data.seat }
-	];
+function replacer(key, value) {
+    if (typeof value === 'bigint') {
+      return value.toString() + 'n'; // Convert BigInt to string and append 'n' to indicate it's a BigInt
+    } else {
+      return value;
+    }
+  }
 
-    // First embed
+function createReserveEmbed(data) {
+    const reservesRegistrationEmbed = new EmbedBuilder()
+    .setTitle(`You have been added to the **reserves list**`)
+    .setDescription(`An admin will contact you if a seat becomes available!`)
+    .setColor('#FFA500')
+    .addFields(
+        { name: "Event", value: data.event, inline: true },
+        { name: "Discord User", value: data.discorduser },
+        { name: "Nickname", value: data.nickname, inline: true }
+    )
+
+    return [reservesRegistrationEmbed];
+}
+
+function createConfirmationEmbeds(data) {
     const registrationEmbed = new EmbedBuilder()
     .setTitle(`Congratulations ${data.discorduser}!  :partying_face: :tada: \n\nYou have registered to attend **__${data.event}__**`)
+    .setColor('#28B81C')
     .addFields(
         { name: "** **", value: "** **" },
         { name: "Nickname", value: data.nickname, inline: true },
@@ -420,10 +637,10 @@ function createConfirmationEmbeds(data) {
     )
     .setFooter({ text: "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀" });
 
-    // Second embed
     const paymentDetailsEmbed = new EmbedBuilder()
         .setTitle("Payment details")
         .setDescription(":moneybag: You will **not** be added to the events participant list until you have paid the entry fee.\n\n:chair: Your seat will be reserved for __14 days__ and will then be made available for other participants to claim!\n\n:money_with_wings: You can receive a refund (in case of dropout) up until 60 days before the event start date.")
+        .setColor('#28B81C')
         .addFields(
             { name: "** **", value: "** **" },
 			{ name: "Paypal", value: "peter.hedman@mail.com", inline: true },

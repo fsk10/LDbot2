@@ -1,12 +1,16 @@
 const logger = require('../utils/logger');
 
-function getNameFromID(interaction, id) {
+async function getNameFromID(interaction, id) {
     // Strip any mention markers from the ID
     id = id.replace(/<@&|<#|>/g, '');
 
-    const user = interaction.client.users.cache.get(id);
-    if (user) {
-        return { type: 'user', name: user.username };
+    try {
+        const fetchedUser = await interaction.client.users.fetch(id);
+        if (fetchedUser) {
+            return { type: 'user', name: fetchedUser.username };
+        }
+    } catch (error) {
+        logger.error(`Failed to directly fetch user with ID: ${id}. Error: ${error.message}`);
     }
 
     const role = interaction.guild.roles.cache.get(id);

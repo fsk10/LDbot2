@@ -62,6 +62,11 @@ module.exports = (sequelize) => {
             preferredSeats: {
                 type: DataTypes.STRING, 
                 allowNull: true
+            },
+            reserve: {
+                type: DataTypes.BOOLEAN,
+                allowNull: true,
+                defaultValue: false
             }
         },
         {

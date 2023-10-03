@@ -154,7 +154,7 @@ async function execute(interaction, client) {
 
 
 			if (result.success) {
-				logActivity(client, `Event **${eventData.name}** was added by ${interaction.user.tag}`);
+				logActivity(client, `Event **${eventData.name}** was added by [ **${interaction.user.tag}** ]`);
 				await interaction.reply({
 					content: `Event **${eventData.name}** added successfully!`,
 					ephemeral: true
@@ -225,13 +225,15 @@ async function execute(interaction, client) {
 			}
 
 			// Add the user
+			const delay = (ms) => new Promise(res => setTimeout(res, ms));
 			const result = await addUser(userData, client);
 			if (result.success) {
-				logActivity(client, `User **${displayName}** (${userData.nickname}) was added to event **${event.name}** by ${interaction.user.tag}`);
+				logActivity(client, `User **${displayName}** (${userData.nickname}) was added to event **${event.name}** by [ **${interaction.user.tag}** ]`);
 				await interaction.reply({
 					content: `User **${displayName}** (${userData.nickname}) was added successfully to event **${event.name}**!`,
 					ephemeral: true
 				});
+				await delay(1000);
 				await updateParticipantList(client, eventId);
 			} else {
 				// Use the error message returned by the addUser function

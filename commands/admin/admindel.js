@@ -49,7 +49,7 @@ async function execute(interaction, client) {
         const result = await deleteEvent(eventId);
     
         if (result.success) {
-            logActivity(client, `Event **${result.eventName}** has been deleted by ${interaction.user.tag}`);
+            logActivity(client, `Event **${result.eventName}** has been deleted by [ **${interaction.user.tag}** ]`);
             await interaction.reply({
                 content: `Event **${result.eventName}** has been deleted.`,
                 ephemeral: true
@@ -68,7 +68,7 @@ async function execute(interaction, client) {
         if (eventId) {
             const result = await deleteUserFromEvent(nickname, eventId, client);
             if (result.success) {
-                logActivity(client, `User **${nickname}** has been removed from the event **${eventId}** by ${interaction.user.tag}`);
+                logActivity(client, `User **${nickname}** has been removed from the event **${eventId}** by [ **${interaction.user.tag}** ]`);
                 await interaction.reply({
 				    content: `User **${nickname}** has been removed from the event **${eventId}**.`,
 				    ephemeral: true
@@ -83,7 +83,7 @@ async function execute(interaction, client) {
             // Handle complete user deletion logic here
             const result = await deleteUserCompletely(nickname, client);
             if (result.success) {
-                logActivity(client, `User **${nickname}** has been completely deleted by ${interaction.user.tag}`);
+                logActivity(client, `User **${nickname}** has been completely deleted from the database by [ **${interaction.user.tag}** ]`);
                 await interaction.reply({
 				    content: `User **${nickname}** has been completely deleted.`,
 				    ephemeral: true

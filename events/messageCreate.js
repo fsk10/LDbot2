@@ -1,11 +1,11 @@
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder } = require('discord.js');
 const { ChannelType } = require('discord.js');
 const { sequelize } = require('../database/database');
 const emailValidator = require("email-validator");
 const { TemporaryRegistration, UserModel, EventModel } = require('../models');
 const countries = require('../config/countryList');
-const { assignSeat } = require('../database/operations.js');
-
+const { assignSeat, isNicknameAvailable } = require('../database/operations.js');
+const logger = require('../utils/logger');
 
 module.exports = {
     name: 'messageCreate',
@@ -24,13 +24,13 @@ module.exports = {
             const regAbortEmbed = new EmbedBuilder()
                 .setTitle('Aborted')
                 .setDescription('Your registration has been aborted!')
-                .setColor('#2dcc20');
+                .setColor('#DD3601');
             await message.author.send({ embeds: [regAbortEmbed] });
             return;
         }
 
         if (!tempReg) {
-            console.log(`The ID ${message.author.id} does not exist in TemporaryRegistration.`);
+            logger.error(`The ID ${message.author.id} does not exist in TemporaryRegistration.`);
             return;
         }    
 
@@ -42,17 +42,16 @@ module.exports = {
             if (tempReg && tempReg.stage) {
                 switch (tempReg.stage) {
                     case 'collectingNickname':
-                        console.log("Handling collectingNickname stage");
+                        // logger.info("Handling collectingNickname stage");
 
-                        // Check if the nickname already exists in the database
-                        const existingUserWithNickname = await UserModel.findOne({ where: { nickname: message.content } });
-                        const ongoingRegistrationWithNickname = await TemporaryRegistration.findOne({ where: { nickname: message.content } });
+                        // Use the isNicknameAvailable function to validate the nickname
+                        const isNicknameValid = await isNicknameAvailable(message.author.id, message.content);
                         
-                        if (existingUserWithNickname || (ongoingRegistrationWithNickname && ongoingRegistrationWithNickname.discorduser !== message.author.id)) {
+                        if (!isNicknameValid) {
                             const regNicknameTakenEmbed = new EmbedBuilder()
                                 .setTitle('Nickname Taken')
                                 .setDescription('This nickname is already taken or in the process of being registered. Please choose a different nickname.')
-                                .setColor('#ff0000');
+                                .setColor('#DD3601');
                             await message.author.send({ embeds: [regNicknameTakenEmbed] });
                             return;
                         }
@@ -62,60 +61,60 @@ module.exports = {
                         try {
                             await tempReg.save();
                         } catch (error) {
-                            console.error("Error saving Temporary Registration:", error.message);
+                            logger.error("Error saving Temporary Registration:", error.message);
                             await message.author.send("An error occurred. Please try again later.");
                             return;
                         }                        
                         const regFirstnameEmbed = new EmbedBuilder()
                             .setTitle('Firstname')
                             .setDescription('Please provide your firstname.')
-                            .setColor('#2dcc20');
+                            .setColor('#0089E4');
                         await message.author.send({ embeds: [regFirstnameEmbed] });
                         break;
 
                     case 'collectingFirstname':
-                        console.log("Handling collectingFirstname stage");
+                        // logger.info("Handling collectingFirstname stage");
                         tempReg.firstname = message.content;
                         tempReg.stage = 'collectingLastname';
                         try {
                             await tempReg.save();
                         } catch (error) {
-                            console.error("Error saving Temporary Registration:", error.message);
+                            logger.error("Error saving Temporary Registration:", error.message);
                             await message.author.send("An error occurred. Please try again later.");
                             return;
                         } 
                         const regLasttnameEmbed = new EmbedBuilder()
                             .setTitle('Lastname')
                             .setDescription('Please provide your lastname.')
-                            .setColor('#2dcc20');
+                            .setColor('#0089E4');
                         await message.author.send({ embeds: [regLasttnameEmbed] });
                         break;
 
                     case 'collectingLastname':
-                        console.log("Handling collectingLastname stage");
+                        // logger.info("Handling collectingLastname stage");
                         tempReg.lastname = message.content;
                         tempReg.stage = 'collectingEmail';
                         try {
                             await tempReg.save();
                         } catch (error) {
-                            console.error("Error saving Temporary Registration:", error.message);
+                            logger.error("Error saving Temporary Registration:", error.message);
                             await message.author.send("An error occurred. Please try again later.");
                             return;
                         } 
                         const regEmailEmbed = new EmbedBuilder()
                             .setTitle('E-mail address')
                             .setDescription('Please provide your e-mail address.')
-                            .setColor('#2dcc20');
+                            .setColor('#0089E4');
                         await message.author.send({ embeds: [regEmailEmbed] });
                         break;
 
                     case 'collectingEmail':
-                        console.log("Handling collectingEmail stage");
+                        // logger.info("Handling collectingEmail stage");
                         if (!emailValidator.validate(message.content)) {                           
                             const regEmailInvalidEmbed = new EmbedBuilder()
                                 .setTitle('Invalid E-mail Format')
                                 .setDescription('You have entered an email-address in an invalid format. Please provide a valid email.')
-                                .setColor('#ff0000');
+                                .setColor('#DD3601');
                             await message.author.send({ embeds: [regEmailInvalidEmbed] });
                             return;
                         }
@@ -124,23 +123,21 @@ module.exports = {
                         try {
                             await tempReg.save();
                         } catch (error) {
-                            console.error("Error saving Temporary Registration:", error.message);
+                            logger.error("Error saving Temporary Registration:", error.message);
                             await message.author.send("An error occurred. Please try again later.");
                             return;
                         } 
                         const regCountryEmbed = new EmbedBuilder()
                             .setTitle('Country')
                             .setDescription('Please provide your country of residence.\n\nUse a two letter country code [alpha-2-code] \nhttps://www.iban.com/country-codes')
-                            .setColor('#2dcc20');
+                            .setColor('#0089E4');
                         await message.author.send({ embeds: [regCountryEmbed] });
                         break;
 
                     case 'collectingCountry':
-                        console.log("Handling collectingCountry stage");
+                        // logger.info("Handling collectingCountry stage");
                         const providedCountryCode = message.content.toUpperCase();
                         const country = countries.find(c => c.value === providedCountryCode);
-
-                        console.log(`Setting country for ${message.author.id}: ${providedCountryCode}`);
                         
                         if (country) {
                             tempReg.unconfirmedCountry = providedCountryCode; // Store temporarily
@@ -148,7 +145,7 @@ module.exports = {
                             try {
                                 await tempReg.save();
                             } catch (error) {
-                                console.error("Error saving Temporary Registration:", error.message);
+                                logger.error("Error saving Temporary Registration:", error.message);
                                 await message.author.send("An error occurred. Please try again later.");
                                 return;
                             }
@@ -167,7 +164,7 @@ module.exports = {
 
                                 const regCountryConfirmEmbed = new EmbedBuilder()
                                     .setTitle(`You've selected __${country.name}__. Is this correct?`)
-                                    .setColor('#2dcc20');
+                                    .setColor('#0089E4');
                                 
                                 await message.author.send({ 
                                     embeds: [regCountryConfirmEmbed],
@@ -180,16 +177,15 @@ module.exports = {
                             const regCountryInvalidEmbed = new EmbedBuilder()
                                 .setTitle('Invalid Country-code')
                                 .setDescription(`The country-code ${providedCountryCode} is incorrect or not available in my list. Please try again or reply with 'NULL' to set a blank value.`)
-                                .setColor('#ff0000');
+                                .setColor('#DD3601');
                             await message.author.send({ embeds: [regCountryInvalidEmbed] });
                         }
                         break;
 
                     case 'confirmingCountry':
-                        console.log("Handling collectingCountryConfirm stage");
+                        // logger.info("Handling collectingCountryConfirm stage");
 
                         if (message.content.toLowerCase() === 'null') {
-                            console.log("Received 'null' as country choice.")
                             tempReg.unconfirmedCountry = null;
                             tempReg.country = null;
 
@@ -199,7 +195,7 @@ module.exports = {
                             try {
                                 await tempReg.save();  // Saving the stage change.
                             } catch (error) {
-                                console.error("Error saving Temporary Registration:", error.message);
+                                logger.error("Error saving Temporary Registration:", error.message);
                                 await message.author.send("An error occurred. Please try again later.");
                                 return;
                             }
@@ -208,7 +204,7 @@ module.exports = {
                             const regPrefSeatsEmbed = new EmbedBuilder()
                                 .setTitle('Preferred Seats')
                                 .setDescription('Please provide your preferred seats for the event.\nFormated as a comma-separated list e.g. 3,11,29,...')
-                                .setColor('#2dcc20');
+                                .setColor('#0089E4');
                             await message.author.send({ embeds: [regPrefSeatsEmbed] });
                         }
                          else {
@@ -218,14 +214,14 @@ module.exports = {
                         break;
 
                     case 'collectingPreferredSeats':
-                        console.log("Handling collectingPreferredSeats stage");
+                        // ("Handling collectingPreferredSeats stage");
                    
                         // Fetch the event details to get the maximum seats
                         const event = await EventModel.findOne({ where: { id: tempReg.eventId } });
                         const eventExists = !!event;
                     
                         if (!eventExists) {
-                            console.error(`Invalid eventId: ${tempReg.eventId}`);
+                            logger.error(`Invalid eventId: ${tempReg.eventId}`);
                             // You can send a message to the user or take other actions here.
                             return;
                         } 
@@ -242,7 +238,7 @@ module.exports = {
                             const regPrefSeatsInvalidMaxEmbed = new EmbedBuilder()
                                 .setTitle('Invalid Preferred Seats List')
                                 .setDescription(`All the seat numbers you provided exceed the maximum seat number of ${seatsAvailable}. Please provide a valid list of preferred seats.`)
-                                .setColor('#ff0000');
+                                .setColor('#DD3601');
                             await message.author.send({ embeds: [regPrefSeatsInvalidMaxEmbed] });
 
                             return;
@@ -261,7 +257,7 @@ module.exports = {
                                 }
                             });
                         } catch (error) {
-                            console.error("Error in assigning seat:", error);
+                            logger.error("Error in assigning seat:", error);
                             await message.author.send("An error occurred while processing your seats. Please try again later.");
                             return;
                         }
@@ -272,7 +268,7 @@ module.exports = {
                             // Create the embed
                             const registrationEmbed = new EmbedBuilder()
                                 .setTitle('Registration Confirmation')
-                                .setColor(0x00AE86)
+                                .setColor('#FFA500')
                                 .setDescription('You are registering the following information.\nConfirm your registration by clicking on **Continue**.')
                                 .addFields(
                                     { name: 'Nickname', value: tempReg.nickname },
@@ -282,8 +278,7 @@ module.exports = {
                                     { name: 'Country', value: `:flag_${tempReg.country.toLowerCase()}:` },
                                     { name: 'Assigned Seat', value: tempReg.seat ? tempReg.seat.toString() : 'Not Assigned' }
                                 )
-                                .setFooter({ text: 'Please ensure all details are correct.' })
-                                .setTimestamp();
+                                .setFooter({ text: 'Please ensure all details are correct.' });
                     
                             // Create buttons
                             const row = new ActionRowBuilder()
@@ -312,7 +307,6 @@ module.exports = {
                         break;                                            
                     
                     case 'editingExistingRegistration':
-                        console.log(`Reached 'editingExistingRegistration' for user: ${message.author.id}`);
                         await message.author.send("Please use the buttons provided in the previous message to manage your registration.");
                         break;                                        
 

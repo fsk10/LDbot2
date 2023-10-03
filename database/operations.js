@@ -38,6 +38,17 @@ async function addUser(userData, client) {
             });
         }
 
+        // Determine if the user should be added as a reserve or a main participant
+        const event = await EventModel.findByPk(userData.event);
+        const occupiedSeats = await EventUsersModel.count({ where: { eventId: userData.event, reserve: false } });
+        
+        if (occupiedSeats >= event.seatsAvailable) {
+            // Add user to the reserve list
+            userData.reserve = true;
+        } else {
+            userData.reserve = false;
+        }
+
         // Add or Update Association in EventUsers Table
         let eventUserAssociation = await EventUsersModel.findOne({
             where: {
@@ -111,7 +122,7 @@ async function updateEvent(eventId, updatedFields) {
 
 
 // Update data for a user
-async function updateUser(nickname, updatedFields) {
+async function updateUser(nickname, updatedFields, client) {
     try {
         const user = await UserModel.findOne({ where: { nickname: nickname } });
         if (!user) {
@@ -124,6 +135,14 @@ async function updateUser(nickname, updatedFields) {
         });
 
         if (result[0] > 0) {
+            // If the nickname was changed, update the participant list for all events the user is part of
+            if ('nickname' in updatedFields) {
+                const userEvents = await EventUsersModel.findAll({ where: { userId: user.id } });
+                for (const userEvent of userEvents) {
+                    await updateParticipantList(client, userEvent.eventId);
+                }
+            }
+
             return { success: true };
         } else {
             logger.error(`No fields were updated for user: ${nickname}`);
@@ -153,13 +172,14 @@ async function updateEventUser(eventId, userId, updatedFields, client) {
         if (result[0] > 0) {
             let shouldUpdateParticipantList = false;
 
-            // If haspaid is being updated
-            if ('haspaid' in updatedFields) {
+            // If haspaid or reserve is being updated
+            if ('haspaid' in updatedFields || 'reserve' in updatedFields) {
                 shouldUpdateParticipantList = true;
             }
 
             // If seat is being updated, we should fetch the haspaid value for the user
             if ('seat' in updatedFields) {
+                shouldUpdateParticipantList = true;
                 const userEventDetails = await EventUsersModel.findOne({
                     where: { 
                         eventId: eventId,
@@ -276,7 +296,6 @@ async function deleteUserCompletely(nickname, client) {
     }
 }
 
-
 // Associate user to event
 async function associateUserToEvent(userId, eventId) {
     try {
@@ -290,6 +309,43 @@ async function associateUserToEvent(userId, eventId) {
         return { success: false, error: error.message || 'Validation error' };
     }
 }
+
+// Move user from the reserves list
+async function moveUserFromReserve(userId, eventId) {
+    try {
+        const user = await EventUsersModel.findOne({ where: { userId, eventId } });
+        if (!user) {
+            return { success: false, error: "User not found in the event" };
+        }
+
+        if (!user.reserve) {
+            return { success: false, error: "User is not in the reserve list" };
+        }
+
+        // Get the first available seat
+        const occupiedSeats = await EventUsersModel.findAll({ 
+            where: { eventId, reserve: false },
+            attributes: ['seat'],
+            order: [['seat', 'ASC']]
+        }).map(seatObj => seatObj.seat);
+
+        let seatToAssign = 1;
+        while (occupiedSeats.includes(seatToAssign)) {
+            seatToAssign++;
+        }
+
+        // Update the user's seat and reserve status
+        user.seat = seatToAssign;
+        user.reserve = false;
+        await user.save();
+
+        return { success: true };
+
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+}
+
 
 // Get a specific setting
 async function getSetting(key) {
@@ -468,14 +524,14 @@ async function handleDatabaseOperations(interaction, collectedData, eventName) {
 async function assignSeat(userId, eventId, preferredSeats) {
     // Ensure the seat array is not empty
     if (!preferredSeats || preferredSeats.length === 0) {
-        console.log("No preferred seats provided.");
+        logger.info("No preferred seats provided.");
         return null;
     }
 
     // Check if the user exists in the `users` table or create a new record if they don't.
     const tempUserDetails = await TemporaryRegistration.findOne({ where: { discorduser: userId } });
     if (!tempUserDetails) {
-        console.error("Error fetching temporary registration details for user");
+        logger.error("Error fetching temporary registration details for user");
         return null;
     }
 
@@ -492,7 +548,7 @@ async function assignSeat(userId, eventId, preferredSeats) {
     });
 
     if (!user) {
-        console.error("Error creating or fetching user");
+        logger.error("Error creating or fetching user");
         return null;
     }
 
@@ -520,8 +576,6 @@ async function assignSeat(userId, eventId, preferredSeats) {
 
         if (!seatTaken || seat === currentSeat) {
             // If seat is available or is the current seat of the user, assign it
-            console.log(`Seat ${seat} is available or is current seat. Assigning to userId: ${user.id}`);
-
             const userEventRecord = await EventUsersModel.findOne({
                 where: {
                     userId: user.id,
@@ -544,10 +598,10 @@ async function assignSeat(userId, eventId, preferredSeats) {
                     });
                     return seat;
                 } catch (error) {
-                    console.error("Error assigning seat:", error);
+                    logger.error("Error assigning seat:", error);
                     if (error instanceof Sequelize.ValidationError) {
                         for (const validationErrorItem of error.errors) {
-                            console.error(`Validation error on field ${validationErrorItem.path}: ${validationErrorItem.message}`);
+                            logger.error(`Validation error on field ${validationErrorItem.path}: ${validationErrorItem.message}`);
                         }
                     }
                 }
@@ -555,7 +609,7 @@ async function assignSeat(userId, eventId, preferredSeats) {
         }
     }
 
-    console.log("All preferred seats are taken.");
+    // logger.info("All preferred seats are taken.");
     return null;
 }
 
@@ -663,7 +717,7 @@ async function fetchOccupiedSeatsForEvent(eventID) {
             hasPaid: record.haspaid
         }));
     } catch (error) {
-        console.error('Error fetching occupied seats:', error);
+        logger.error('Error fetching occupied seats:', error);
         return [];
     }
 }
@@ -673,7 +727,7 @@ async function generateCurrentSeatingMap(eventID) {
     await updateSeatingMap(occupiedSeats);
     
     // Read the image into a buffer and return the buffer
-    return await fs.readFile('./images/UpdatedLDSeatingMapV4.png');
+    return await fs.readFile('./images/UpdatedSeatingMap.png');
 }
 
 function truncateNickname(nickname) {
@@ -694,13 +748,13 @@ async function createEventEmbed(eventId) {
 
         const embed = new EmbedBuilder()
             .setTitle(`Participants for ${event.name}`)
-            .setColor('#0099ff')
+            .setColor('#0089E4')
             .setDescription(event.users.map(user => user.nickname).join('\n'));
 
         return embed;
     } catch (error) {
         logger.error(`Error creating embed for eventId ${eventId}:`, error);
-        return null; // or however you want to handle this
+        return null; 
     }
 }
 
@@ -716,7 +770,7 @@ async function updateParticipantList(client, eventId) {
         });
 
         // Constructing the embed description dynamically
-        let embedDescription = "**#** **| Country | Nick | Seat**\n";
+        let embedDescription = "\* *Only participants who have paid the entry fee are included in this list.*\n\n**#** **| Country | Nick | Seat**\n";
 
         const DESIRED_NICKNAME_LENGTH = 18;
 
@@ -724,11 +778,11 @@ async function updateParticipantList(client, eventId) {
         event.users.forEach(user => {
             if (!user.EventUsers || !user.EventUsers.paidAt) {
                 invalidUsers++;
-                console.error(`User ${user.nickname} has invalid EventUsers data`);
+                logger.error(`User ${user.nickname} has invalid EventUsers data`);
             }
         });
         if (invalidUsers > 0) {
-            console.error(`${invalidUsers} users have invalid data. Stopping further processing.`);
+            logger.error(`${invalidUsers} users have invalid data. Stopping further processing.`);
             return;
         }
 
@@ -748,13 +802,13 @@ async function updateParticipantList(client, eventId) {
                 }
 
             } catch (err) {
-            console.error(`Error processing user with nickname: ${user.nickname}. Error: ${err.message}`);
+            logger.error(`Error processing user with nickname: ${user.nickname}. Error: ${err.message}`);
             }
         });
 
         const matchResult = event.participantchannel.match(/\d+/);
         if (!matchResult || matchResult.length === 0) {
-            console.error(`Failed to extract channel ID from ${event.participantchannel}`);
+            logger.error(`Failed to extract channel ID from ${event.participantchannel}`);
             return;
         }
         const channelId = matchResult[0];
@@ -775,7 +829,7 @@ async function updateParticipantList(client, eventId) {
             try {
                 await channel.bulkDelete(fetchedMessages);
             } catch (error) {
-                console.error(`Failed to bulk delete messages. Error: ${error.message}`);
+                logger.error(`Failed to bulk delete messages. Error: ${error.message}`);
             }
         }
 
@@ -799,10 +853,163 @@ async function updateParticipantList(client, eventId) {
         };
         channel.send({ embeds: [embed] });
 
+        // Fetch the reserve users and send the reserves list embed
+        const reserveUsers = await getReserveUsersForEvent(eventId);
+        if (reserveUsers.length > 0) {  // Check if there are any reserve users
+            const reserveEmbed = createReserveListEmbed(reserveUsers);
+            channel.send({ embeds: [reserveEmbed] });
+        }
+
     } catch (error) {
         logger.error(`Error updating participant list for eventId ${eventId}:`, error);
     }
 }
+
+async function getReserveUsersForEvent(eventId) {
+    return await EventUsersModel.findAll({
+        where: {
+            eventId: eventId,
+            reserve: true
+        },
+        include: {
+            model: UserModel,
+            as: 'user'
+        },
+        order: [['createdAt', 'ASC']]
+    });
+}
+
+function createReserveListEmbed(reserveUsers) {
+    let embedDescription = '**#** **| Country | Nick**\n';
+
+    reserveUsers.forEach((reserveUser, index) => {
+        const flagEmoji = `:flag_${reserveUser.user.country.toLowerCase()}:`;
+        const formattedIndex = (index + 1).toString().padStart(2, '0');
+        embedDescription += `\`${formattedIndex}. \` ${flagEmoji} \` ${reserveUser.user.nickname} \`\n`;
+    });
+
+    const reserveEmbed = {
+        title: "**RESERVES LIST**",  // This sets the title for the reserves list embed
+        description: embedDescription,
+        color: 11027200,
+        footer: {
+            text: "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀"
+        }
+    };
+
+    return reserveEmbed;
+}
+
+async function getAvailableSeatsForEvent(eventId, editingUserId = null) {
+    try {
+        // Fetch the total number of seats for the event
+        const event = await EventModel.findByPk(eventId);
+        if (!event) {
+            logger.error(`Event not found for eventId: ${eventId}`); //debug
+            return { success: false, error: "Event not found." };
+        }
+
+        const totalSeats = event.seatsavailable;
+
+        const occupiedSeatsWhereClause = {
+            eventId: eventId,
+            seat: {
+                [Op.ne]: null  // Ensure the seat is not null
+            }
+        };
+
+        // Exclude the user who is currently editing their registration
+        if (editingUserId) {
+            occupiedSeatsWhereClause.userId = {
+                [Op.ne]: editingUserId
+            };
+        }
+
+        // Fetch the number of occupied seats for the event
+        const occupiedSeatsCount = await EventUsersModel.count({
+            where: occupiedSeatsWhereClause
+        });
+
+        // Calculate the number of available seats
+        const availableSeats = totalSeats - occupiedSeatsCount;
+
+        return { success: true, availableSeats: availableSeats, totalSeats: totalSeats, eventName: event.name };
+    } catch (error) {
+        logger.error(`Error fetching available seats for eventId ${eventId}:`, error);
+        return { success: false, error: error.message };
+    }
+}
+
+
+async function isNicknameAvailable(userId, desiredNickname) {
+    let currentUser;
+    
+    // Try fetching the current user's nickname
+    try {
+        currentUser = await UserModel.findOne({ where: { discorduser: userId } });
+    } catch (error) {
+        logger.error("Error fetching user based on userId:", error.message);
+        return false;
+    }
+
+    // If the desired nickname matches the current user's nickname, allow it
+    if (currentUser && currentUser.nickname === desiredNickname) {
+        return true;
+    }
+
+    // If the desired nickname doesn't match the current one, check for its uniqueness in both UserModel and TemporaryRegistration
+    try {
+        const existingUserWithNickname = await UserModel.findOne({ where: { nickname: desiredNickname } });
+        const ongoingRegistrationWithNickname = await TemporaryRegistration.findOne({ where: { nickname: desiredNickname } });
+        
+        // If no user is found with the desired nickname in both models, it's available
+        if (!existingUserWithNickname && !ongoingRegistrationWithNickname) {
+            return true;
+        }
+
+        // If we found another user with the desired nickname, or it's in the process of registration, it's not available
+        if (existingUserWithNickname || (ongoingRegistrationWithNickname && ongoingRegistrationWithNickname.discorduser !== userId)) {
+            return false;
+        }
+
+    } catch (error) {
+        logger.error("Error checking nickname availability:", error.message);
+        return false;
+    }
+
+    // Default to false for any unhandled cases
+    return false;
+}
+
+async function handleTempRegistration(interaction, stage, eventName, eventId, user = null) {
+    const existingTempReg = await TemporaryRegistration.findOne({ 
+        where: { 
+            discorduser: interaction.user.id 
+        } 
+    });
+
+    const registrationData = {
+        stage: stage,
+        event: eventName,
+        eventId: eventId,
+        discorduser: interaction.user.id
+    };
+
+    if (user) {
+        registrationData.nickname = user.nickname;
+        registrationData.firstname = user.firstname;
+        registrationData.lastname = user.lastname;
+        registrationData.email = user.email;
+        registrationData.country = user.country;
+    }
+
+    if (existingTempReg) {
+        await existingTempReg.update(registrationData);
+    } else {
+        await TemporaryRegistration.create(registrationData);
+    }
+}
+
 
 module.exports = {
   addEvent,
@@ -816,6 +1023,7 @@ module.exports = {
   checkSeatTaken,
   checkUserInEvent,
   associateUserToEvent,
+  moveUserFromReserve,
   deleteEvent,
   deleteUserFromEvent,
   deleteUserCompletely,
@@ -829,8 +1037,13 @@ module.exports = {
   getSeatCoordinates,
   getNicknameCoordinates,
   fetchOccupiedSeatsForEvent,
+  getAvailableSeatsForEvent,
   generateCurrentSeatingMap,
   truncateNickname,
   updateParticipantList,
-  createEventEmbed
+  createEventEmbed,
+  getReserveUsersForEvent,
+  createReserveListEmbed,
+  isNicknameAvailable,
+  handleTempRegistration
 };

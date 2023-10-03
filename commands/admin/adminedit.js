@@ -1,8 +1,8 @@
 const { SlashCommandBuilder } = require('@discordjs/builders');
+const { EmbedBuilder } = require('discord.js');
 const { Op } = require('sequelize');
-const { updateEvent, updateUser, updateEventUser } = require('../../database/operations');
-const { listEvents, listUsers } = require('../../database/operations');
-const { UserModel, EventModel } = require('../../models');
+const { updateEvent, updateUser, updateEventUser, updateParticipantList, getAvailableSeatsForEvent } = require('../../database/operations');
+const { UserModel, EventModel, EventUsersModel } = require('../../models');
 const logActivity = require('../../utils/logActivity');
 const { isAdmin } = require('../../utils/permissions');
 const logger = require('../../utils/logger');
@@ -39,6 +39,7 @@ const commandData = new SlashCommandBuilder()
             .addStringOption(option => option.setName('nickname').setDescription('Nickname of the user to edit').setRequired(true).setAutocomplete(true))
             .addIntegerOption(option => option.setName('seat').setDescription('Seat number for the user'))
             .addBooleanOption(option => option.setName('haspaid').setDescription('Has the user paid?'))
+            .addBooleanOption(option => option.setName('reserve').setDescription('Set the user as reserve'))
     );
 
 
@@ -107,7 +108,13 @@ async function execute(interaction, client) {
             const result = await updateEvent(eventName, updatedFields, client);
 
             if (result.success) {
-                logActivity(client, `Event **${originalEventName.name}** was updated by ${interaction.user.tag}`);
+                // Log the event update
+                let logMessage = `Event **${originalEventName.name}** was updated by [ **${interaction.user.tag}** ].\n`;
+                for (const [key, value] of Object.entries(updatedFields)) {
+                    logMessage += `:white_small_square: ${key} = ${value} \n`;
+                }
+                logMessage = logMessage.slice(0, -2); // Remove the trailing comma and space
+                logActivity(client, logMessage);
                 await interaction.reply({
                     content: `Event **${originalEventName.name}** has been updated successfully!`,
                     ephemeral: true
@@ -141,7 +148,13 @@ async function execute(interaction, client) {
             const result = await updateUser(nickname, updatedFields, client);
 
             if (result.success) {
-                logActivity(client, `User **${nickname}** was updated by ${interaction.user.tag}`);
+                // Log the user update
+                let logMessage = `User **${nickname}** was updated by [ **${interaction.user.tag}** ].\n`;
+                for (const [key, value] of Object.entries(updatedFields)) {
+                    logMessage += `:white_small_square: ${key} = ${value} \n`;
+                }
+                logMessage = logMessage.slice(0, -2); // Remove the trailing comma and space
+                logActivity(client, logMessage);
                 await interaction.reply({
                     content: `User **${nickname}** has been updated successfully!`,
                     ephemeral: true
@@ -189,22 +202,113 @@ async function execute(interaction, client) {
             }
             const currentEventId = eventRecord.id;
 
+            // Fetch the current reserve status for the user
+            const currentEventUser = await EventUsersModel.findOne({
+                where: {
+                    userId: userId,
+                    eventId: currentEventId
+                }
+            });
+            const currentReserveStatus = currentEventUser ? currentEventUser.reserve : null;
+            const newReserveStatus = interaction.options.getBoolean('reserve');
+            
+            // Handle Reserve to Main Transition
+            if (currentReserveStatus && !newReserveStatus) {
+
+                // Check available seats for the event
+                const seatCheck = await getAvailableSeatsForEvent(currentEventId);
+                if (seatCheck.success && seatCheck.availableSeats === 0) {
+                    // If the event is full, send an error message
+                    return await interaction.reply({
+                        content: `The event **${seatCheck.eventName}** is already full. Please remove a user from the main list before adding another.`,
+                        ephemeral: true
+                    });
+                } else if (!seatCheck.success) {
+                    logger.error(`Error checking available seats for event ${currentEventId}: ${seatCheck.error}`);
+                    return await interaction.reply({
+                        content: 'Error checking available seats for the event. Please try again.',
+                        ephemeral: true
+                    });
+                }
+
+                // User is being moved from reserve list to main list.
+                const occupiedSeats = await EventUsersModel.findAll({
+                    where: {
+                        eventId: currentEventId,
+                        reserve: false,
+                        seat: { [Op.ne]: null }
+                    },
+                    attributes: ['seat'],
+                    order: [['seat', 'ASC']]
+                });
+
+                let availableSeat = 1;
+
+                occupiedSeats.forEach((seatObj, index) => {
+                    if (seatObj.seat === availableSeat) {
+                        availableSeat++;
+                    }
+                });
+
+                updatedFields['seat'] = availableSeat;
+                updatedFields['reserve'] = false;
+            }
+
+            // Handle Main to Reserve Transition
+            if (!currentReserveStatus && newReserveStatus) {
+                // User is being moved from main list to reserve list.
+                updatedFields['seat'] = null; // Release the user's seat.
+                updatedFields['reserve'] = true;
+            }
+
             // Now call the update function
             const result = await updateEventUser(currentEventId, userId, updatedFields, client);
 
             if (result.success) {
-                logActivity(client, `User **${nickname}** was updated for **${eventRecord.name}** by ${interaction.user.tag}`);
-                await interaction.reply({
-                    content: `User **${nickname}**'s details for **${eventRecord.name}** have been updated successfully!`,
-                    ephemeral: true
-                });
-            } else {
-                logger.error("Error in /adminedit eventuser:", result.message || "Unknown error");
-                await interaction.reply({
-                    content: 'Error updating user-event details. Please try again.',
-                    ephemeral: true
-                });
-            }
+                // Check for reserve status changes
+                if (result.success) {
+                    // Check for reserve status changes
+                    if (currentReserveStatus && !newReserveStatus) { 
+                        // Only when user was on the reserve list and now is on the main list
+                        const embeds = createConfirmationEmbeds({
+                            discorduser: interaction.user.username,
+                            event: eventRecord.name,
+                            nickname: user.nickname,
+                            seat: updatedFields['seat'],
+                            country: user.country,
+                            firstname: user.firstname,
+                            lastname: user.lastname,
+                            email: user.email
+                        });
+                
+                        // Send the embeds to the user
+                        interaction.user.send({ embeds: embeds });
+                    } else if (newReserveStatus) {
+                        const movedToReserveEmbed = new EmbedBuilder()
+                            .setTitle('You have been moved to the reserves list!')
+                            .setDescription(`Event: **${eventRecord.name}**\n\nWe'll notify you if a seat becomes available again.`)
+                            .setColor('#FFA500');
+                        await interaction.user.send({ embeds: [movedToReserveEmbed] });
+                    }
+                
+                    // Log the user event update
+                    let logMessage = `User **${nickname}** was updated by [ **${interaction.user.tag}** ].\n`;
+                    for (const [key, value] of Object.entries(updatedFields)) {
+                        logMessage += `:white_small_square: ${key} = ${value} \n`;
+                    }
+                    logActivity(client, logMessage.trim()); // Use trim() to remove any trailing newline
+                    await interaction.reply({
+                        content: `User **${nickname}** has been updated successfully!`,
+                        ephemeral: true
+                    });
+                } else {
+                    logger.error("Error in /adminedit eventuser:", result.message || "Unknown error");
+                    await interaction.reply({
+                        content: 'Error updating user-event details. Please try again.',
+                        ephemeral: true
+                    });
+                }
+            }   
         }
     } catch (error) {
         logger.error("Error in /adminedit eventuser:", error);
@@ -213,7 +317,43 @@ async function execute(interaction, client) {
             ephemeral: true
         });
     }
-}   
+} 
+
+function createConfirmationEmbeds(data) {
+    const registrationEmbed = new EmbedBuilder()
+    .setTitle(`Congratulations ${data.discorduser}!  :partying_face: :tada: \n\nYou have received a spot at **__${data.event}__**`)
+    .setColor('#28B81C')
+    .addFields(
+        { name: "** **", value: "** **" },
+        { name: "Nickname", value: data.nickname, inline: true },
+        { name: "Assigned seat", value: data.seat ? data.seat.toString() : 'Not Assigned', inline: true },
+        { name: "Country", value: `:flag_${data.country.toLowerCase()}:`, inline: true },
+        { name: "** **", value: "** **" },
+        { name: "Firstname", value: data.firstname, inline: true },
+        { name: "Lastname", value: data.lastname, inline: true },
+        { name: "E-mail address", value: data.email, inline: true },
+    )
+    .setFooter({ text: "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀" });
+
+    const paymentDetailsEmbed = new EmbedBuilder()
+        .setTitle("Payment details")
+        .setDescription(":moneybag: You will **not** be added to the events participant list until you have paid the entry fee.\n\n:chair: Your seat will be reserved for __14 days__ and will then be made available for other participants to claim!\n\n:money_with_wings: You can receive a refund (in case of dropout) up until 60 days before the event start date.")
+        .setColor('#28B81C')
+        .addFields(
+            { name: "** **", value: "** **" },
+			{ name: "Paypal", value: "peter.hedman@mail.com", inline: true },
+			{ name: "Revolut", value: "@peterj1cv", inline: true },
+			{ name: "Swish [Only-swedes]", value: "0703835558", inline: true },
+			{ name: "** **", value: "** **" },
+			{ name: "Bank payment (Non-swedes)", value: "BIC: NDEASESS\nIBAN(SWIFT-address): SE9230000000008307147515" },
+			{ name: "** **", value: "** **" },
+			{ name: "Bank payment [Only-swedes]", value: "Bank: Nordea\nClearing number: 3300\nAccount number: 830714-7515" },
+			{ name: "** **", value: "```\nMake sure that we receive the full sum of 30 EUR. \nIf you pay by PayPal make sure to send it to  \"Family and friends\" to avoid added fees.\n```" }
+        )
+        .setFooter({ text: "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀" });
+
+    return [registrationEmbed, paymentDetailsEmbed];
+}
 
 module.exports = {
     data: commandData,

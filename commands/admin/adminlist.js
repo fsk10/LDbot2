@@ -41,33 +41,38 @@ const commandData = new SlashCommandBuilder()
    
 
 
-function splitEmbeds(users, eventName, interaction, outputType = 'short', allUsers = false) {
+async function splitEmbeds(users, eventName, interaction, outputType = 'short', allUsers = false) {
     const MAX_SIZE = 4096;
 
     let embeds = [];
     let currentEmbedDescription = "​";
     let charCount = currentEmbedDescription.length;
 
-    users.forEach(user => {
+    for (const user of users) {
         const seat = user.events && user.events[0] ? user.events[0].EventUsers.seat : 'N/A';
         const haspaid = user.events && user.events[0] ? user.events[0].EventUsers.haspaid : false;
+        const reserve = user.events && user.events[0] ? user.events[0].EventUsers.reserve : false;
+        const seatInfo = (seat && seat !== 'N/A') ? `Seat: ${seat}\n` : '';
 
-        const nameResult = getNameFromID(interaction, user.discorduser);
+        const nameResult = await getNameFromID(interaction, user.discorduser);
         const discordName = (nameResult && nameResult.type === 'user') ? `@${nameResult.name}` : 'Unknown';
 
         let userInfo;
+        let notPaidIndicator = (!haspaid && !reserve) ? ' :small_orange_diamond:' : ''; // Add the not paid icon if the user hasn't paid and isn't a reserve
+
         if (allUsers) {
             if (outputType === 'short') {
-                userInfo = `:flag_${user.country.toLowerCase()}: ${user.nickname} (${discordName})\n`;
+                userInfo = `:flag_${user.country.toLowerCase()}: **${user.nickname}** (${discordName})${reserve ? ' :small_red_triangle:' : ''}${notPaidIndicator}\n`;
             } else {
                 const eventList = user.events.map(e => `:white_small_square: ${e.name}`).join('\n');
                 userInfo = `**${user.nickname}**\nUser ID: ${user.id}\nDiscord Name: ${discordName}\nDiscord ID: ${user.discorduser}\nFull Name: ${user.firstname} ${user.lastname}\nEmail: ${user.email}\nCountry: :flag_${user.country.toLowerCase()}:\nIn Event(s):\n${eventList}\n\n`;
             }
         } else {
             if (outputType === 'short') {
-                userInfo = `:flag_${user.country.toLowerCase()}: ${user.nickname} (${discordName})\n`;
+                const seatText = (!reserve && seat !== 'N/A') ? `[#${seat}]` : '';
+                userInfo = `:flag_${user.country.toLowerCase()}: **${user.nickname}** (${discordName}) ${seatText} ${reserve ? ' :small_red_triangle:' : ''}${notPaidIndicator}\n`;
             } else {
-                userInfo = `**${user.nickname}**\nUser ID: ${user.id}\nDiscord Name: ${discordName}\nDiscord ID: ${user.discorduser}\nSeat: ${seat}\nPaid: ${haspaid ? 'Yes' : 'No'}\nFull Name: ${user.firstname} ${user.lastname}\nEmail: ${user.email}\nCountry: :flag_${user.country.toLowerCase()}:\n\n`;
+                userInfo = `**${user.nickname}**\nUser ID: ${user.id}\nDiscord Name: ${discordName}\nDiscord ID: ${user.discorduser}\nReserve: ${reserve ? 'Yes' : 'No'}\n${seatInfo}Paid: ${haspaid ? 'Yes' : 'No'}\nFull Name: ${user.firstname} ${user.lastname}\nEmail: ${user.email}\nCountry: :flag_${user.country.toLowerCase()}:\n\n`;
             }
         }
 
@@ -75,7 +80,7 @@ function splitEmbeds(users, eventName, interaction, outputType = 'short', allUse
             embeds.push(new EmbedBuilder()
                 .setTitle("User List")
                 .setDescription(currentEmbedDescription)
-                .setColor('#0099ff'));
+                .setColor('#0089E4'));
 
             currentEmbedDescription = "​";
             charCount = currentEmbedDescription.length;
@@ -83,13 +88,13 @@ function splitEmbeds(users, eventName, interaction, outputType = 'short', allUse
 
         currentEmbedDescription += userInfo;
         charCount += userInfo.length;
-    });
+    };
 
     if (charCount > 0) {
         embeds.push(new EmbedBuilder()
             .setTitle(`User List (${eventName})`)
-            .setDescription(currentEmbedDescription)
-            .setColor('#0099ff'));
+            .setDescription(`:small_red_triangle: Reserve :small_orange_diamond: Unpaid entry fee\n\n${currentEmbedDescription}`)
+            .setColor('#0089E4'));
     }
 
     return embeds;
@@ -126,7 +131,7 @@ async function execute(interaction) {
             allUsers = true;
         }
     
-        const userEmbeds = splitEmbeds(users, eventName, interaction, outputType, allUsers);
+        const userEmbeds = await splitEmbeds(users, eventName, interaction, outputType, allUsers);
     
         // Defer the reply to the interaction.
         await interaction.deferReply({ ephemeral: true });
@@ -142,7 +147,7 @@ async function execute(interaction) {
 
         const embed = new EmbedBuilder()
             .setTitle('List of Events')
-            .setColor('#0099ff');
+            .setColor('#0089E4');
 
             events.forEach(event => {
                 const formattedStartDate = formatDisplayDate(event.startdate);

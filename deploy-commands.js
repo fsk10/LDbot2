@@ -31,7 +31,9 @@ const rest = new REST().setToken(BOT_TOKEN);
 module.exports = async function deployCommands() {
     for (const prepareFunc of prepareCommands) {
         const commandData = await prepareFunc();
-        commands.push(commandData);
+        if (commandData) {  // Only push to commands if commandData is truthy (i.e., not null or undefined).
+            commands.push(commandData);
+        }
     }
 
     try {
