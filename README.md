@@ -77,9 +77,9 @@ This bot was developed for a specific, personal project and is made public for r
 | ------- | ----------- | ------- |
 | `/adminget <setting>` | .... | `....` |
 | `/adminset <setting> <value>` | .... | `....` |
-| `/adminadd <event|user>` | .... | `....` |
-| `/adminedit <event|user|eventuser>` | .... | `....` |
-| `/admindel <event|user>` | .... | `....` |
-| `/adminlist <events|users>` | .... | `....` |
+| `/adminadd <event\|user>` | .... | `....` |
+| `/adminedit <event\|user\|eventuser>` | .... | `....` |
+| `/admindel <event\|user>` | .... | `....` |
+| `/adminlist <events\|users>` | .... | `....` |
 | `/register <event>` | .... | `....` |
 | ....      | ....         | ....     |
