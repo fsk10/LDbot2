@@ -3,7 +3,7 @@
 LDbot2 is a Discord bot designed for managing and organizing events. 
 
 **Disclaimer:** 
-This bot was developed for a specific, personal project and is made public for reference purposes only. The repository does not offer support, guarantees, or warranties for its functionality outside of its original intent. If you choose to utilize or modify the code, do so at your own risk.
+This bot was developed entirely with the help of ChatGPT for a specific, personal project and is made public for reference purposes only. The repository does not offer support, guarantees, or warranties for its functionality outside of its original intent. If you choose to utilize or modify the code, do so at your own risk.
 
 ## Features
 **Legend**:
@@ -27,7 +27,7 @@ This bot was developed for a specific, personal project and is made public for r
   	* :white_check_mark: **Add users to events**
   	  * :white_check_mark: **Dynamic participantslist:** Generate dynamic event participants-list in defined event-channel.
   	  * :white_check_mark: **Dynamic seating map:** Generate dynamic seating map in the participants channel and during user seat registration.
-  	  * :calendar: **Reserves list:** Add users to an event reserveslist when participant seat limit is reached.
+  	  * :white_check_mark: **Reserves list:** Add users to an event reserveslist when participant seat limit is reached.
     * :white_check_mark: **Edit user details**
     * :white_check_mark: **Remove users from events**
     * :white_check_mark: **List users in events**
@@ -36,8 +36,8 @@ This bot was developed for a specific, personal project and is made public for r
 - **User Commands**:
 	* :white_check_mark: **Register for event:** *Command for users to signup to events*
 	* :white_check_mark: **Edit registration:** *Functionality for users to edit their own user and event registration details (built into the register command)*
-	* :calendar: **Unregister from event:** *Command for users to leave/remove themselves from an event*
-
+	* :white_check_mark: **Unregister from event:** *Command for users to leave/remove themselves from an event*
+   * :white_check_mark: **View event & user Status info:** *Command for users to show some short event and user registration details*
 
 #
 ### Installation
@@ -82,4 +82,6 @@ This bot was developed for a specific, personal project and is made public for r
 | `/admindel <event\|user>` | .... | `....` |
 | `/adminlist <events\|users>` | .... | `....` |
 | `/register <event>` | .... | `....` |
+| `/unregister <event>` | .... | `....` |
+| `/status` .| .... | `....` |
 | ....      | ....         | ....     |

@@ -10,7 +10,7 @@ const logger = require('../utils/logger');
 module.exports = {
     name: 'messageCreate',
     async execute(message) {
-        if (message.author.bot) return; 
+        if (message.author.bot || message.channel.type !== ChannelType.DM) return; 
         
         const tempReg = await TemporaryRegistration.findOne({ where: { discorduser: message.author.id } });
 

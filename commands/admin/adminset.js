@@ -31,10 +31,12 @@ const commandData = new SlashCommandBuilder()
         
         if (!userIsAdmin) {
             // Inform the user that they don't have the required permissions
-            return interaction.reply({
-                content: 'You don\'t have the required permissions to use this command.',
-                ephemeral: true
-            });
+            const permissionErrorEmbed = new EmbedBuilder()
+                    .setTitle('Permission Denied')
+                    .setDescription("You don't have the required permissions to use this command.")
+                    .setColor('#FF0000'); // Red color for error
+    
+            return interaction.reply({ embeds: [permissionErrorEmbed], ephemeral: true });
         }
 
         const settingName = interaction.options.getString('setting');
@@ -42,30 +44,27 @@ const commandData = new SlashCommandBuilder()
     
         try {
             const nameResult = await getNameFromID(interaction, value);
+
             if (nameResult) {
                 value = nameResult.name;
             } else {
-                let isValid = true;
-    
-                // If the value is a potential ID or a Discord mention
-                if (/^\d+$/.test(value) || value.startsWith('<@&') || value.startsWith('<#')) {
-                    isValid = false;
-                }
-    
-                if (!isValid) {
+                // Check if the value matches a potential ID or a Discord mention format
+                const isPotentialID = /^\d+$/.test(value) || value.startsWith('<@&') || value.startsWith('<#');
+
+                if (isPotentialID) {
                     interaction.reply({ 
-                        content: `The ID provided is neither a valid role nor a channel. Please provide a valid role or channel ID.`, 
+                        content: `The ID provided is neither a valid user, role, nor a channel. Please provide a valid ID.`, 
                         ephemeral: true 
                     });
-                    return;
                 } else {
                     interaction.reply({ 
-                        content: `The provided value is not a recognized format. Please provide a valid role or channel ID.`, 
+                        content: `The provided value is not a recognized format. Please provide a valid ID or mention.`, 
                         ephemeral: true 
                     });
-                    return;
                 }
+                return;
             }
+
     
             const processedValue = processSetting(settingName, value);  // This function processes and validates the input
     

@@ -24,10 +24,12 @@ async function execute(interaction) {
     
     if (!userIsAdmin) {
         // Inform the user that they don't have the required permissions
-        return interaction.reply({
-            content: 'You don\'t have the required permissions to use this command.',
-            ephemeral: true
-        });
+        const permissionErrorEmbed = new EmbedBuilder()
+                .setTitle('Permission Denied')
+                .setDescription("You don't have the required permissions to use this command.")
+                .setColor('#FF0000'); // Red color for error
+
+        return interaction.reply({ embeds: [permissionErrorEmbed], ephemeral: true });
     }
 
     const settingName = interaction.options.getString('setting');

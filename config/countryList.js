@@ -10,6 +10,7 @@ module.exports = [
     { name: 'Finland', value: 'FI' },
     { name: 'France', value: 'FR' },
     { name: 'Germany', value: 'DE' },
+    { name: 'Greece', value: 'GR' },
     { name: 'Hungary', value: 'HU' },
     { name: 'Latvia', value: 'LV' },
     { name: 'Netherlands', value: 'NL' },

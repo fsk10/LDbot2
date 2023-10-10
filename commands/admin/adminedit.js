@@ -25,7 +25,7 @@ const commandData = new SlashCommandBuilder()
     .addSubcommand(subcommand => 
         subcommand.setName('user')
             .setDescription('Edit general user properties')
-            .addStringOption(option => option.setName('nickname').setDescription('Nickname of the user to edit').setRequired(true).setAutocomplete(true))
+            .addStringOption(option => option.setName('nickname').setDescription('Nickname of the user to edit').setRequired(true).setAutocomplete(false))
             .addStringOption(option => option.setName('newnickname').setDescription('New nickname for the user'))
             .addStringOption(option => option.setName('firstname').setDescription('First name for the user'))
             .addStringOption(option => option.setName('lastname').setDescription('Last name for the user'))
@@ -36,7 +36,7 @@ const commandData = new SlashCommandBuilder()
         subcommand.setName('eventuser')
             .setDescription('Edit event-specific user properties')
             .addStringOption(option => option.setName('event').setDescription('Event for the user to edit').setRequired(true).setAutocomplete(true))
-            .addStringOption(option => option.setName('nickname').setDescription('Nickname of the user to edit').setRequired(true).setAutocomplete(true))
+            .addStringOption(option => option.setName('nickname').setDescription('Nickname of the user to edit').setRequired(true).setAutocomplete(false))
             .addIntegerOption(option => option.setName('seat').setDescription('Seat number for the user'))
             .addBooleanOption(option => option.setName('haspaid').setDescription('Has the user paid?'))
             .addBooleanOption(option => option.setName('reserve').setDescription('Set the user as reserve'))
@@ -64,10 +64,12 @@ async function execute(interaction, client) {
         
 	if (!userIsAdmin) {
 		// Inform the user that they don't have the required permissions
-		return interaction.reply({
-			content: 'You don\'t have the required permissions to use this command.',
-			ephemeral: true
-		});
+		const permissionErrorEmbed = new EmbedBuilder()
+                .setTitle('Permission Denied')
+                .setDescription("You don't have the required permissions to use this command.")
+                .setColor('#FF0000'); // Red color for error
+
+        return interaction.reply({ embeds: [permissionErrorEmbed], ephemeral: true });
 	}
 
     const subcommand = interaction.options.getSubcommand();
@@ -270,8 +272,11 @@ async function execute(interaction, client) {
                     // Check for reserve status changes
                     if (currentReserveStatus && !newReserveStatus) { 
                         // Only when user was on the reserve list and now is on the main list
+                        const discordUserId = user.discorduser;
+                        const userToNotify = await client.users.fetch(discordUserId);
+
                         const embeds = createConfirmationEmbeds({
-                            discorduser: interaction.user.username,
+                            discorduser: userToNotify.username,
                             event: eventRecord.name,
                             nickname: user.nickname,
                             seat: updatedFields['seat'],
@@ -280,15 +285,19 @@ async function execute(interaction, client) {
                             lastname: user.lastname,
                             email: user.email
                         });
-                
+                        
                         // Send the embeds to the user
-                        interaction.user.send({ embeds: embeds });
+                        await userToNotify.send({ embeds: embeds });
+
                     } else if (newReserveStatus) {
                         const movedToReserveEmbed = new EmbedBuilder()
                             .setTitle('You have been moved to the reserves list!')
                             .setDescription(`Event: **${eventRecord.name}**\n\nWe'll notify you if a seat becomes available again.`)
                             .setColor('#FFA500');
-                        await interaction.user.send({ embeds: [movedToReserveEmbed] });
+
+                            const discordUserId = user.discorduser;
+                            const userToNotify = await client.users.fetch(discordUserId);
+                            await userToNotify.send({ embeds: [movedToReserveEmbed] });
                     }
                 
                     // Log the user event update

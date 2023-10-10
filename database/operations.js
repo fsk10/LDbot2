@@ -9,6 +9,9 @@ const Jimp = require('jimp');
 const fs = require('fs').promises;
 const path = require('path');
 
+// Used in the function "scheduleParticipantListUpdate"
+let updateScheduled = false;
+
 // Creates a new event in the database.
 async function addEvent(eventData) {
     try {
@@ -42,11 +45,13 @@ async function addUser(userData, client) {
         const event = await EventModel.findByPk(userData.event);
         const occupiedSeats = await EventUsersModel.count({ where: { eventId: userData.event, reserve: false } });
         
-        if (occupiedSeats >= event.seatsAvailable) {
-            // Add user to the reserve list
-            userData.reserve = true;
-        } else {
-            userData.reserve = false;
+        if (typeof userData.reserve === 'undefined') {
+            if (occupiedSeats >= event.seatsAvailable) {
+                // Add user to the reserve list
+                userData.reserve = true;
+            } else {
+                userData.reserve = false;
+            }
         }
 
         // Add or Update Association in EventUsers Table
@@ -61,6 +66,7 @@ async function addUser(userData, client) {
             // Update the existing association with new event-specific data
             eventUserAssociation.seat = userData.seat;
             eventUserAssociation.haspaid = userData.haspaid;
+            eventUserAssociation.reserve = userData.reserve;
             if (userData.haspaid) {
                 eventUserAssociation.paidAt = new Date();
             }
@@ -71,14 +77,16 @@ async function addUser(userData, client) {
                 eventId: userData.event,
                 seat: userData.seat,
                 haspaid: userData.haspaid,
-                paidAt: userData.haspaid ? new Date() : null
+                paidAt: userData.haspaid ? new Date() : null,
+                reserve: userData.reserve
             });
         }
 
         await eventUserAssociation.save();
         
         if (userData.haspaid) {
-            await updateParticipantList(client, userData.event);
+            // await updateParticipantList(client, userData.event);
+            await scheduleParticipantListUpdate(client, userData.event);
         }
 
         return { success: true, user: user };
@@ -257,7 +265,7 @@ async function deleteUserFromEvent(nickname, eventName, client) {
     // Update the participant list for the event after removing the user.
     await updateParticipantList(client, event.id);
 
-    return { success: true };
+    return { success: true, eventName: event.name };
 }
 
 // Delete a user from the database completely
@@ -902,6 +910,8 @@ function createReserveListEmbed(reserveUsers) {
 
 async function getAvailableSeatsForEvent(eventId, editingUserId = null) {
     try {
+        logger.info(`getAvailableSeatsForEvent called with eventId: ${eventId} and editingUserId: ${editingUserId}`); //debug
+
         // Fetch the total number of seats for the event
         const event = await EventModel.findByPk(eventId);
         if (!event) {
@@ -910,6 +920,8 @@ async function getAvailableSeatsForEvent(eventId, editingUserId = null) {
         }
 
         const totalSeats = event.seatsavailable;
+
+        logger.info(`Fetched event details. Total Seats for eventId ${eventId}: ${totalSeats}`); //debug
 
         const occupiedSeatsWhereClause = {
             eventId: eventId,
@@ -925,17 +937,23 @@ async function getAvailableSeatsForEvent(eventId, editingUserId = null) {
             };
         }
 
+        logger.info(`Where clause for occupied seats: ${JSON.stringify(occupiedSeatsWhereClause)}`); //debug
+
         // Fetch the number of occupied seats for the event
         const occupiedSeatsCount = await EventUsersModel.count({
             where: occupiedSeatsWhereClause
         });
 
+        logger.info(`Occupied Seats Count for eventId ${eventId}: ${occupiedSeatsCount}`); //debug
+
         // Calculate the number of available seats
         const availableSeats = totalSeats - occupiedSeatsCount;
 
+        logger.info(`Calculated available seats for eventId ${eventId}: ${availableSeats}`); //debug
+
         return { success: true, availableSeats: availableSeats, totalSeats: totalSeats, eventName: event.name };
     } catch (error) {
-        logger.error(`Error fetching available seats for eventId ${eventId}:`, error);
+        logger.error(`Error in getAvailableSeatsForEvent for eventId ${eventId} and editingUserId: ${editingUserId}. Error: ${error.message}`);
         return { success: false, error: error.message };
     }
 }
@@ -1010,6 +1028,18 @@ async function handleTempRegistration(interaction, stage, eventName, eventId, us
     }
 }
 
+function scheduleParticipantListUpdate(client, eventId) {
+    if (!updateScheduled) {
+        updateScheduled = true;
+
+        setTimeout(() => {
+            updateParticipantList(client, eventId);
+            updateScheduled = false;
+        }, 5000);  // Wait 5 seconds before updating
+    }
+}
+
+
 
 module.exports = {
   addEvent,
@@ -1045,5 +1075,6 @@ module.exports = {
   getReserveUsersForEvent,
   createReserveListEmbed,
   isNicknameAvailable,
-  handleTempRegistration
+  handleTempRegistration,
+  scheduleParticipantListUpdate
 };

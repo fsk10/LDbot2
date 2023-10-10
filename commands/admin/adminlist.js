@@ -55,7 +55,7 @@ async function splitEmbeds(users, eventName, interaction, outputType = 'short', 
         const seatInfo = (seat && seat !== 'N/A') ? `Seat: ${seat}\n` : '';
 
         const nameResult = await getNameFromID(interaction, user.discorduser);
-        const discordName = (nameResult && nameResult.type === 'user') ? `@${nameResult.name}` : 'Unknown';
+        const discordName = (nameResult && nameResult.type === 'user') ? `${nameResult.name}` : 'Unknown';
 
         let userInfo;
         let notPaidIndicator = (!haspaid && !reserve) ? ' :small_orange_diamond:' : ''; // Add the not paid icon if the user hasn't paid and isn't a reserve
@@ -106,12 +106,14 @@ async function execute(interaction) {
     const userIsAdmin = await isAdmin(interaction);
     
     if (!userIsAdmin) {
-        // Inform the user that they don't have the required permissions
-        return interaction.reply({
-            content: "You don't have the required permissions to use this command.",
-            ephemeral: true
-        });
-    }
+		// Inform the user that they don't have the required permissions
+		const permissionErrorEmbed = new EmbedBuilder()
+                .setTitle('Permission Denied')
+                .setDescription("You don't have the required permissions to use this command.")
+                .setColor('#FF0000'); // Red color for error
+
+        return interaction.reply({ embeds: [permissionErrorEmbed], ephemeral: true });
+	}
 
     const subcommand = interaction.options.getSubcommand();
 

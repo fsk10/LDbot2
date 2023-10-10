@@ -104,17 +104,24 @@ module.exports = {
             extractionMethod: 'getString'
         },
         {
-            name: 'seat',
-            description: 'Assigned seat for the user',
-            type: 'INTEGER',
-            required: true,
-            extractionMethod: 'getInteger'
-        },
-        {
             name: 'haspaid',
             description: 'Specify if user has paid the entry fee or not',
             type: 'BOOLEAN',
             required: true,
+            extractionMethod: 'getBoolean'
+        },
+        {
+            name: 'seat',
+            description: 'Assigned seat for the user',
+            type: 'INTEGER',
+            required: false,
+            extractionMethod: 'getInteger'
+        },
+        {
+            name: 'reserve',
+            description: 'Specify if user is a reserve',
+            type: 'BOOLEAN',
+            required: false,
             extractionMethod: 'getBoolean'
         }
     ]

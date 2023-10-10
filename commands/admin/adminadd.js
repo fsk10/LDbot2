@@ -74,10 +74,12 @@ async function execute(interaction, client) {
         
 	if (!userIsAdmin) {
 		// Inform the user that they don't have the required permissions
-		return interaction.reply({
-			content: 'You don\'t have the required permissions to use this command.',
-			ephemeral: true
-		});
+		const permissionErrorEmbed = new EmbedBuilder()
+                .setTitle('Permission Denied')
+                .setDescription("You don't have the required permissions to use this command.")
+                .setColor('#FF0000'); // Red color for error
+
+        return interaction.reply({ embeds: [permissionErrorEmbed], ephemeral: true });
 	}
 
 	const subcommand = interaction.options.getSubcommand();
@@ -181,6 +183,9 @@ async function execute(interaction, client) {
 				userData[optionName] = extractOption(optionName, interaction, optionConfig.extractionMethod);
 			}
 
+			// Check if user is a reserve
+			const isReserve = userData.reserve;
+
 			// Fetch the event
 			const eventId = interaction.options.getInteger('event');
 			const event = await getEvent(eventId);
@@ -200,21 +205,25 @@ async function execute(interaction, client) {
 				});
 			}
 	
-			// Check if seat exceeds event's seats
-			if (userData.seat > event.seatsAvailable) {
-				return await interaction.reply({
-					content: `The seat number exceeds the available seats for this event. Maximum seat number is ${event.seatsAvailable}.`,
-					ephemeral: true
-				});
-			}
-	
-			// Check if the seat is already taken
-			const isSeatTaken = await checkSeatTaken(eventId, userData.seat);
-			if (isSeatTaken) {
-				return await interaction.reply({
-					content: 'The specified seat is already taken for this event. Please choose a different seat.',
-					ephemeral: true
-				});
+			if (isReserve) {
+				userData.seat = null;  // Clear the seat if the user is a reserve
+			} else {
+				// Check if seat exceeds event's seats
+				if (userData.seat > event.seatsAvailable) {
+					return await interaction.reply({
+						content: `The seat number exceeds the available seats for this event. Maximum seat number is ${event.seatsAvailable}.`,
+						ephemeral: true
+					});
+				}
+			
+				// Check if the seat is already taken
+				const isSeatTaken = await checkSeatTaken(eventId, userData.seat);
+				if (isSeatTaken) {
+					return await interaction.reply({
+						content: 'The specified seat is already taken for this event. Please choose a different seat.',
+						ephemeral: true
+					});
+				}
 			}
 			
 			// Get the discord username from the discord userID
@@ -228,12 +237,19 @@ async function execute(interaction, client) {
 			const delay = (ms) => new Promise(res => setTimeout(res, ms));
 			const result = await addUser(userData, client);
 			if (result.success) {
-				logActivity(client, `User **${displayName}** (${userData.nickname}) was added to event **${event.name}** by [ **${interaction.user.tag}** ]`);
-				await interaction.reply({
-					content: `User **${displayName}** (${userData.nickname}) was added successfully to event **${event.name}**!`,
-					ephemeral: true
-				});
-				await delay(1000);
+				if (isReserve) {
+					logActivity(client, `User **${displayName}** (${userData.nickname}) was added as a reserve to event **${event.name}** by [ **${interaction.user.tag}** ]`);
+					await interaction.reply({
+						content: `User **${displayName}** (${userData.nickname}) was added as a reserve to event **${event.name}**!`,
+						ephemeral: true
+					});
+				} else {
+					logActivity(client, `User **${displayName}** (${userData.nickname}) was added to event **${event.name}** by [ **${interaction.user.tag}** ]`);
+					await interaction.reply({
+						content: `User **${displayName}** (${userData.nickname}) was added successfully to event **${event.name}**!`,
+						ephemeral: true
+					});
+				}
 				await updateParticipantList(client, eventId);
 			} else {
 				// Use the error message returned by the addUser function

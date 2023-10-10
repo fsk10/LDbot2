@@ -13,25 +13,19 @@ async function execute(interaction) {
         const userId = interaction.user.id;
         const user = await UserModel.findOne({ where: { discorduser: userId } });
         
-        if (!user) {
-            return interaction.reply({
-                content: 'You are not registered in our system.',
-                ephemeral: true
-            });
-        }
-
         const events = await EventModel.findAll();
         const embeds = [];
 
         for (const event of events) {
             const seatsInfo = await getAvailableSeatsForEvent(event.id);
 
-            const userRegistration = await EventUsersModel.findOne({
-                where: { userId: user.id, eventId: event.id }
-            });
+            let userRegistration;
+            if (user) {
+                userRegistration = await EventUsersModel.findOne({
+                    where: { userId: user.id, eventId: event.id }
+                });
+            }
 
-            const paymentStatus = userRegistration.haspaid ? 'Paid' : 'Pending';
-            const registrationStatus = userRegistration.reserve ? 'Reserve' : 'Registered';
             const embed = new EmbedBuilder()
                 .setTitle("Event & User Status")
                 .setColor('#0089E4')
@@ -46,14 +40,17 @@ async function execute(interaction) {
                     { name: ":moneybag:  Entry Fee", value: `€${event.entryfee}`, inline: true }
                 );
 
-            if (userRegistration) {
-                embed.addFields(
-                    { name: "`                  USER STATUS                   `", value: "** **" },
-                    { name: ":pencil:  Registration status", value: `${registrationStatus} (${paymentStatus})`, inline: true },
-                    { name: "** **", value: "** **", inline: true },
-                    { name: ":seat:  Seat", value: userRegistration.seat ? `#${userRegistration.seat}` : 'Not assigned', inline: true }
-                );
-            }
+                if (userRegistration) {
+                    const paymentStatus = userRegistration.haspaid ? 'Paid' : 'Pending';
+                    const registrationStatus = userRegistration.reserve ? 'Reserve' : 'Registered';
+                    embed.addFields(
+                        { name: "`                  USER STATUS                   `", value: "** **" },
+                        { name: ":pencil:  Registration status", value: `${registrationStatus} (${paymentStatus})`, inline: true },
+                        { name: "** **", value: "** **", inline: true },
+                        { name: ":seat:  Seat", value: userRegistration.seat ? `#${userRegistration.seat}` : 'Not assigned', inline: true }
+                    );
+                }
+                
 
             embeds.push(embed);
         }

@@ -36,11 +36,14 @@ async function execute(interaction, client) {
     const userIsAdmin = await isAdmin(interaction);
     
     if (!userIsAdmin) {
-        return interaction.reply({
-            content: "You don't have the required permissions to use this command.",
-            ephemeral: true
-        });
-    }
+		// Inform the user that they don't have the required permissions
+		const permissionErrorEmbed = new EmbedBuilder()
+                .setTitle('Permission Denied')
+                .setDescription("You don't have the required permissions to use this command.")
+                .setColor('#FF0000'); // Red color for error
+
+        return interaction.reply({ embeds: [permissionErrorEmbed], ephemeral: true });
+	}
 
     const subcommand = interaction.options.getSubcommand();
 
@@ -68,9 +71,9 @@ async function execute(interaction, client) {
         if (eventId) {
             const result = await deleteUserFromEvent(nickname, eventId, client);
             if (result.success) {
-                logActivity(client, `User **${nickname}** has been removed from the event **${eventId}** by [ **${interaction.user.tag}** ]`);
+                logActivity(client, `User **${nickname}** has been removed from the event **${result.eventName}** by [ **${interaction.user.tag}** ]`);
                 await interaction.reply({
-				    content: `User **${nickname}** has been removed from the event **${eventId}**.`,
+				    content: `User **${nickname}** has been removed from the event **${result.eventName}**.`,
 				    ephemeral: true
 			    });
             } else {
