@@ -74,7 +74,7 @@ async function execute(interaction) {
                 try {
                     const allFiles = fs.readdirSync(backupDirectory);
                     const backupFiles = allFiles.filter(file => file.endsWith('.sqlite')).sort().reverse();
-                    let latestBackupDate = 'None';
+                    let lastBackupDate = 'None';
                     let totalBackups = 0;
 
                     if (backupFiles.length > 0) {
@@ -82,17 +82,18 @@ async function execute(interaction) {
                         const matches = backupFiles[0].match(/^db_backup_(\d{4}\d{2}\d{2}-\d{2}\d{2}\d{2})/
                         );
                         if (matches && matches[1]) {
-                            latestBackupDate = formatBackupFilenameToReadable(backupFiles[0]);
+                            lastBackupDate = formatBackupFilenameToReadable(backupFiles[0]);
                         } else {
-                            latestBackupDate = "Unexpected filename format for backup.";
+                            lastBackupDate = "Unexpected filename format for backup.";
                         }
                     }
 
                     let nextBackupDate = "Unknown";
-                    if (backupConfig.isEnabled) {
-                        const now = DateTime.utc().toJSDate();
-                        const nextBackupDateTime = new Date(now.getTime() + (backupConfig.intervalInDays * 24 * 60 * 60 * 1000));
-                        nextBackupDate = formatDateToReadable(nextBackupDateTime);
+                    if (backupConfig.isEnabled && backupConfig.backupStartTime) {
+                        const backupStartTime = DateTime.fromISO(backupConfig.backupStartTime);
+                        const intervalsPassed = Math.ceil((DateTime.utc().diff(backupStartTime, 'days').days) / backupConfig.intervalInDays);
+                        const nextBackupDateTime = backupStartTime.plus({ days: intervalsPassed * backupConfig.intervalInDays });
+                        nextBackupDate = formatDateToReadable(nextBackupDateTime.toJSDate());
                     }
 
                     const embed = new EmbedBuilder()
@@ -103,7 +104,7 @@ async function execute(interaction) {
                             { name: 'Backup Interval', value: `${backupConfig.intervalInDays} days` },
                             { name: 'Versions to Keep', value: `${backupConfig.versionsToKeep}` },
                             { name: 'Total backups', value: String(totalBackups) },
-                            { name: 'Latest backup', value: latestBackupDate },
+                            { name: 'Last backup', value: lastBackupDate },
                             { name: 'Next backup', value: nextBackupDate }
                         );
                     await interaction.editReply({ embeds: [embed], ephemeral: true });
@@ -126,7 +127,13 @@ async function execute(interaction) {
             case 'enabled':
                 const isEnabled = interaction.options.getBoolean('value');
                 backupConfig.isEnabled = isEnabled;
-                replyMessage += `Backup is now ${isEnabled ? "enabled" : "disabled"}`;
+
+                if (isEnabled && !backupConfig.backupStartTime) {
+                    backupConfig.backupStartTime = DateTime.utc().toISO();  // Store current time as backup start time
+                    saveBackupConfig(backupConfig);
+                }                
+
+                replyMessage += `Automatic backup is now ${isEnabled ? "enabled" : "disabled"}`;
                 saveBackupConfig(backupConfig);
                 setBackupInterval(backupConfig);
                 break;
