@@ -8,6 +8,7 @@ backup/*.sqlite
 # Environment variables and configuration
 *.env
 config.json
+config/backupConfig.js
 
 # Logs
 logs/

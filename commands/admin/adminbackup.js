@@ -8,9 +8,15 @@ const { isAdmin } = require('../../utils/permissions');
 const logger = require('../../utils/logger');
 
 let backupIntervalID = null;
-const backupConfigPath = path.join(__dirname, '../../config/backupConfig.js');
 const databasePath = path.join(__dirname, '../../database/db.sqlite');
+const backupConfigPath = path.join(__dirname, '../../config/backupConfig.js');
 const backupDirectory = path.join(__dirname, '../../backup');
+const defaultBackupConfig = {
+    isEnabled: false,
+    intervalInDays: 7, // default to 7 days, for example
+    versionsToKeep: 5, // default to 5 versions, for example
+    backupStartTime: null
+};
 const initialBackupConfig = loadBackupConfig();
 setBackupInterval(initialBackupConfig);
 
@@ -188,6 +194,10 @@ function setBackupInterval(backupConfig) {
 
 // Load backup configuration
 function loadBackupConfig() {
+    if (!fs.existsSync(backupConfigPath)) {
+        saveBackupConfig(defaultBackupConfig);
+    }
+
     delete require.cache[require.resolve(backupConfigPath)]; // Clear cache to reload fresh config
     return require(backupConfigPath);
 }
