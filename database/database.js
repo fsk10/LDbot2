@@ -1,44 +1,41 @@
 const { Sequelize } = require('sequelize');
+const path = require('path');
 const logger = require('../utils/logger');
 const settingsConfig = require('../config/settingsConfig');
 const defaultSettings = Object.keys(settingsConfig);
-const path = require('path');
 
 const sequelize = new Sequelize({
-    dialect: 'sqlite',
-    logging: false,
-    storage: path.join(__dirname, 'db.sqlite'),
-    define: {
-        timestamps: false,
-        freezeTableName: true
-    }
+  dialect: 'sqlite',
+  logging: false,
+  storage: path.join(__dirname, 'db.sqlite'),
+  define: {
+    timestamps: false,
+    freezeTableName: true
+  }
 });
 
-
-// Models
 const Settings = require('../models/settingsModel')(sequelize);
 
-// Initialization Logic
 async function initializeDatabase() {
-    // Synchronize the database
-    await sequelize.sync()
-        .then(() => {
-            logger.info("Database initialized.");
-        })
-        .catch(err => {
-            logger.error("Error initializing the database:", err);
-        });
+  try {
+    const alter = false; // toggle for database ALTER logic on startup
+    await sequelize.sync({ alter });
+    logger.info(`Database initialized${alter ? ' (alter mode ON)' : ''}.`);
+  } catch (err) {
+    logger.error('Error initializing the database:', err);
+    throw err;
+  }
 
-    // Initialization for settings
-    for (let settingName of defaultSettings) {
-        await Settings.findOrCreate({
-            where: { key: settingName },
-            defaults: { value: "" }
-        });
-    }
+  // Seed settings rows
+  for (const settingName of defaultSettings) {
+    await Settings.findOrCreate({
+      where: { key: settingName },
+      defaults: { value: '' }
+    });
+  }
 }
 
 module.exports = {
-    sequelize,
-    initializeDatabase
+  sequelize,
+  initializeDatabase
 };

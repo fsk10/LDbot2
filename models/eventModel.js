@@ -33,6 +33,27 @@ module.exports = (sequelize) => {
       type: DataTypes.STRING,
       allowNull: true
     },
+    chartId: {
+      type: DataTypes.STRING,
+      allowNull: true
+    },
+    baseImagePath: {
+      type: DataTypes.STRING,
+      allowNull: true
+    },
+    paymentconfig: {
+      type: DataTypes.STRING,
+      allowNull: true
+    },
+    adminrole: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
+    regopen: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
     // ... add other fields as needed
   }, 
   {
@@ -41,8 +62,7 @@ module.exports = (sequelize) => {
     freezeTableName: true,
     modelName: 'event',
     tableName: 'events'
-  }
-  );
+  });
 
   return Event;
 }

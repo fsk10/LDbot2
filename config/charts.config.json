@@ -1,0 +1,24 @@
+{
+  "chartsDir": "./charts",
+  "seating": {
+    "defaultChartId": "default",
+    "font": "FONT_SANS_16_BLACK",
+    "nameMaxChars": 11,
+    "overlay": {
+      "occupied": "rgba(230,20,20,0.5)",
+      "pending": "rgba(255,160,0,0.5)"
+    },
+    "invertNameRotation": true,
+    "invertNameOffsetY": false,
+    "anchorNudgePct": 0.6,
+    "anchorNudgePx": null,
+    "anchorXNudgePx": null,
+    "anchorXNudgePct": 0.30,
+    "debug": false
+  },
+  "uploads": {
+    "maxJsonBytes": 1048576,
+    "maxImageBytes": 5242880,
+    "allowedImageMime": ["image/png", "image/jpeg", "image/jpg", "image/webp"]
+  }
+}

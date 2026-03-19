@@ -64,7 +64,7 @@ module.exports = {
 
             const embed = new EmbedBuilder()
             .setTitle("Unregister Confirmation")
-            .setDescription(`Are you sure you want to remove your registration for **${eventName}**?`)
+            .setDescription(`Are you sure you want to remove your registration for\n **${eventName}** \n`)
             .setColor("#FFA500");
 
         await interaction.reply({

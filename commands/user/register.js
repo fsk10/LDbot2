@@ -1,10 +1,12 @@
 const { SlashCommandBuilder } = require('@discordjs/builders');
 const { Op } = require('sequelize');
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder } = require('discord.js');
-const { UserModel, EventModel, EventUsersModel } = require('../../models');
+const { UserModel, EventModel, EventUsersModel, TemporaryRegistration } = require('../../models');
 const { listEvents, handleTempRegistration } = require('../../database/operations');
 const logger = require('../../utils/logger');
 const logActivity = require('../../utils/logActivity');
+const { getRegistrationSnapshot } = require('../../utils/registrationData');
+const { buildCurrentRegistrationEmbed, buildManageRegistrationButtons, buildAlreadyRegisteredNotice, buildAccountExistsEmbed } = require('../../utils/embeds');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -18,6 +20,10 @@ module.exports = {
         ),
         
     async execute(interaction) {
+        if (!interaction.deferred && !interaction.replied) {
+            await interaction.deferReply({ ephemeral: true }).catch(() => {});
+        }
+
         const discorduser = interaction.user.id;
         const eventName = interaction.options.getString('event');
         const events = await listEvents({ all: true });
@@ -56,83 +62,82 @@ module.exports = {
         });
 
         let eventDetails = await EventModel.findByPk(eventId);
-        const maxSeats = eventDetails.seats;
-        let isReserve = false;
-
-        if (registeredUsersForEvent >= maxSeats) {
-            isReserve = true;
-        }
 
         if (isUserRegisteredForEvent) {
-            eventDetails = await EventModel.findOne({ where: { id: eventId } });
-            await handleTempRegistration(interaction, 'editingExistingRegistration', eventName, eventId, user);          
-        
+            // 1) Load the event row
+            const eventDetails = await EventModel.findOne({ where: { id: eventId } });
+
+            // 2) Store lightweight context so the new buttons work
+            await TemporaryRegistration.upsert({
+                discorduser: interaction.user.id,
+                eventId,
+                event: eventDetails.name,
+                stage: 'manageExisting',
+            });
+
+            // 3) Build and DM the unified “Current Event Registration” card (with seat / reserve)
+            const snap = await getRegistrationSnapshot(interaction.user.id);
+            const existing = await EventUsersModel.findOne({ where: { userId: user.id, eventId } });
+
+            const dmEmbed = buildCurrentRegistrationEmbed({
+                eventName: eventDetails.name,
+                discordUsername: interaction.user.username,
+                userSnap: snap,
+                seat: existing?.seat || null,
+                isReserve: !!existing?.reserve,
+            });
+            const dmButtons = buildManageRegistrationButtons();
+
             try {
-                // Create the embed with the user's current registration details
-                const currentDetailsEmbed = new EmbedBuilder()
-                    .setTitle(`Current Event Registration`)
-                    .setDescription(`**Event:**\n${eventDetails.name}`)
-                    .setColor('#FFA500')
-                    .addFields(
-                        { name: 'Nickname', value: user.nickname },
-                        { name: 'Firstname', value: user.firstname },
-                        { name: 'Lastname', value: user.lastname },
-                        { name: 'Email', value: user.email },
-                        { name: 'Country', value: `:flag_${user.country.toLowerCase()}:` },
-                        { name: 'Seat', value: isUserRegisteredForEvent.seat ? isUserRegisteredForEvent.seat.toString() : 'Not assigned' }
-                    )
-                    .setFooter({ text: 'Please confirm or edit your details.' });
-        
-                // Create buttons for editing or confirming
-                const row = new ActionRowBuilder()
-                    .addComponents(
-                        new ButtonBuilder()
-                            .setCustomId('registration_confirm')
-                            .setLabel('No Changes')
-                            .setStyle(3),
-                        new ButtonBuilder()
-                            .setCustomId('registration_edit')
-                            .setLabel('Edit Registration')
-                            .setStyle(1)
-                    );
-        
-                await interaction.user.send({ embeds: [currentDetailsEmbed], components: [row] });
+                await interaction.user.send({ embeds: [dmEmbed], components: [dmButtons] });
             } catch (error) {
-                logger.error("Error sending embed and buttons in 'editingExistingRegistration':", error);
+                logger.error("Error sending current-registration DM:", error);
             }
 
-            const regCheckDMsEmbed = new EmbedBuilder()
-                .setTitle('Manage Your Registration')
-                .setDescription(`Go to your DMs to manage your registration for event\n**${eventDetails.name}**`)
-                .setColor('#0089E4');
-            await interaction.reply({ embeds: [regCheckDMsEmbed], ephemeral: true });
-
+            // 4) Ephemeral “go to DMs” notice in the guild
+            const regCheckDMsEmbed = buildAlreadyRegisteredNotice({ eventName: eventDetails.name });
+            await interaction.editReply({ embeds: [regCheckDMsEmbed] });
             return;
-        }               
+        }     
         else if (user) {
+            // Show the unified “Account exists” card via builder (uses account_confirm button)
             const eventDetails = await EventModel.findOne({ where: { id: eventId } });
-            const actualEventName = eventDetails.name;
 
-            const regAlreadyRegEmbed = new EmbedBuilder()
-                .setTitle('Account Already Exists')
-                .setDescription(`You already have an account registered in the bot database, but you have **NOT YET SIGNED UP** for the event **${actualEventName}**.`)
-                .setColor('#FFA500')
-                .addFields(
-                    { name: 'Nickname', value: user.nickname, inline: true },
-                    { name: 'Firstname', value: user.firstname, inline: true },
-                    { name: 'Lastname', value: user.lastname, inline: true },
-                    { name: 'Email', value: user.email, inline: true },
-                    { name: 'Country', value: `:flag_${user.country.toLowerCase()}:`, inline: true },
-                    { name: '** **', value: `** **`, inline: true },
-                    { name: '** **', value: `** **`, inline: true },
-                    { name: 'You now only need to provide your preferred seats to signup for the event:', value: `(Formated as a comma-separated list e.g. 3,11,29,..)` }
-                )
-                .setFooter({ text: 'You can stop/abort your registration at any time by typing !abort' });
+            // Seed a temp row so the button handlers know which event we’re working on
+            await TemporaryRegistration.upsert({
+                discorduser: interaction.user.id,
+                eventId,
+                event: eventDetails.name,
+                nickname: user.nickname,
+                firstname: user.firstname,
+                lastname: user.lastname,
+                email: user.email,
+                country: user.country,
+                stage: 'showingAccountConfirm',
+            });
 
-            await interaction.user.send({ embeds: [regAlreadyRegEmbed] });
-            
-            // Check if there's an existing temporary registration for the user and update/create as necessary
-            await handleTempRegistration(interaction, 'collectingPreferredSeats', eventName, eventId, user);
+            const snap = await getRegistrationSnapshot(interaction.user.id);
+            const { embed, row } = buildAccountExistsEmbed({
+                eventName: eventDetails.name,
+                snap,
+                discordUsername: interaction.user.username,
+            });
+
+            try {
+                await interaction.user.send({ embeds: [embed], components: [row] });
+            } catch (err) {
+                logger.error('Error DMing account-exists card:', err);
+            }
+
+            // Tell the user to check DMs (we already deferred)
+            await interaction.editReply({
+                embeds: [{
+                title: 'Registration',
+                description: `Check your DMs to start registration for **${eventDetails.name}**.`,
+                color: 0x28B81C
+                }]
+            });
+            return;
         }
         else {
             const eventDetails = await EventModel.findOne({ where: { id: eventId } });
@@ -158,6 +163,6 @@ module.exports = {
             .setTitle('Register for Event')
             .setDescription(`Go to your DMs to continue the registration for event\n**${eventDetails.name}**`)
             .setColor('#0089E4');
-        await interaction.reply({ embeds: [regCheckDMsEmbed], ephemeral: true });
+        await interaction.editReply({ embeds: [regCheckDMsEmbed] });
     }
 };

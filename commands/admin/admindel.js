@@ -1,139 +1,112 @@
 const { SlashCommandBuilder } = require('@discordjs/builders');
+const { EmbedBuilder } = require('discord.js'); // <-- you were missing this
 const { isAdmin } = require('../../utils/permissions');
 const { deleteEvent, deleteUserFromEvent, listEvents, listUsers, deleteUserCompletely } = require('../../database/operations');
 const logActivity = require('../../utils/logActivity');
 
 const commandData = new SlashCommandBuilder()
-    .setName('admindel')
-    .setDescription('Delete events or user from an event')
-    .addSubcommand(subcommand => 
-        subcommand.setName('event')
-            .setDescription('Delete an event')
-            .addStringOption(option => 
-                option.setName('eventname')
-                    .setDescription('Name of the event to delete')
-                    .setRequired(true)
-                    .setAutocomplete(true)
-            ))
-    .addSubcommand(subcommand => 
-        subcommand.setName('user')
-            .setDescription('Delete a user from an event')
-            .addStringOption(option => 
-                option.setName('nickname')
-                    .setDescription('Name of the user to delete')
-                    .setRequired(true)
-                    .setAutocomplete(true)
-            )
-            .addStringOption(option => 
-                option.setName('eventname')
-                    .setDescription('Name of the event')
-                    .setRequired(false)
-                    .setAutocomplete(true)
-            ));
+  .setName('admindel')
+  .setDescription('Delete events or user from an event')
+  .addSubcommand(sub =>
+    sub.setName('event')
+      .setDescription('Delete an event')
+      .addStringOption(o =>
+        o.setName('eventname')
+          .setDescription('Event to delete')
+          .setRequired(true)
+          .setAutocomplete(true)
+      ))
+  .addSubcommand(sub =>
+    sub.setName('user')
+      .setDescription('Delete a user from an event (or delete the user entirely if no event provided)')
+      .addStringOption(o =>
+        o.setName('nickname')
+          .setDescription('User nickname')
+          .setRequired(true)
+          .setAutocomplete(true)
+      )
+      .addStringOption(o =>
+        o.setName('eventname')
+          .setDescription('Event (optional; if omitted, the user is deleted entirely)')
+          .setRequired(false)
+          .setAutocomplete(true)
+      )
+  );
 
 async function execute(interaction, client) {
-    // Check admin permissions
+  try {
+    // permissions first
     const userIsAdmin = await isAdmin(interaction);
-    
     if (!userIsAdmin) {
-		// Inform the user that they don't have the required permissions
-		const permissionErrorEmbed = new EmbedBuilder()
-                .setTitle('Permission Denied')
-                .setDescription("You don't have the required permissions to use this command.")
-                .setColor('#FF0000'); // Red color for error
-
-        return interaction.reply({ embeds: [permissionErrorEmbed], ephemeral: true });
-	}
-
-    const subcommand = interaction.options.getSubcommand();
-
-    if (subcommand === 'event') {
-        const eventId = interaction.options.getString('eventname');
-        const result = await deleteEvent(eventId);
-    
-        if (result.success) {
-            logActivity(client, `Event **${result.eventName}** has been deleted by [ **${interaction.user.tag}** ]`);
-            await interaction.reply({
-                content: `Event **${result.eventName}** has been deleted.`,
-                ephemeral: true
-            });
-        } else {
-            await interaction.reply({
-                content: result.error,
-                ephemeral: true
-            });
-        }
-    } else if (subcommand === 'user') {
-        const nickname = interaction.options.getString('nickname');
-        const eventId = interaction.options.getString('eventname');
-
-        // Check if the eventId is provided
-        if (eventId) {
-            const result = await deleteUserFromEvent(nickname, eventId, client);
-            if (result.success) {
-                logActivity(client, `User **${nickname}** has been removed from the event **${result.eventName}** by [ **${interaction.user.tag}** ]`);
-                await interaction.reply({
-				    content: `User **${nickname}** has been removed from the event **${result.eventName}**.`,
-				    ephemeral: true
-			    });
-            } else {
-                await interaction.reply({
-                    content: result.error,
-                    ephemeral: true
-                });
-            }
-        } else {
-            // Handle complete user deletion logic here
-            const result = await deleteUserCompletely(nickname, client);
-            if (result.success) {
-                logActivity(client, `User **${nickname}** has been completely deleted from the database by [ **${interaction.user.tag}** ]`);
-                await interaction.reply({
-				    content: `User **${nickname}** has been completely deleted.`,
-				    ephemeral: true
-			    });
-            } else {
-                await interaction.reply({
-                    content: result.error,
-                    ephemeral: true
-                });
-            }
-        }
+      const emb = new EmbedBuilder()
+        .setTitle('Permission Denied')
+        .setDescription("You don't have the required permissions to use this command.")
+        .setColor('#FF0000');
+      return interaction.reply({ embeds: [emb], ephemeral: true });
     }
+
+    // defer to avoid the 3s timeout
+    await interaction.deferReply({ ephemeral: true });
+
+    const sub = interaction.options.getSubcommand();
+
+    if (sub === 'event') {
+      // NOTE: autocomplete returns the event *ID* as value
+      const eventIdStr = interaction.options.getString('eventname', true);
+      const result = await deleteEvent(eventIdStr);
+
+      if (result.success) {
+        logActivity(client, `Event **${result.eventName}** has been deleted by [ **${interaction.user.tag}** ]`);
+        return interaction.editReply(`✅ Event **${result.eventName}** has been deleted.`);
+      } else {
+        return interaction.editReply(`❌ ${result.error || 'Failed to delete event.'}`);
+      }
+    }
+
+    if (sub === 'user') {
+      const nickname = interaction.options.getString('nickname', true);
+      const eventIdStr = interaction.options.getString('eventname'); // optional
+
+      if (eventIdStr) {
+        const result = await deleteUserFromEvent(nickname, eventIdStr, client);
+        if (result.success) {
+          logActivity(client, `User **${nickname}** has been removed from **${result.eventName}** by [ **${interaction.user.tag}** ]`);
+          return interaction.editReply(`✅ User **${nickname}** has been removed from **${result.eventName}**.`);
+        } else {
+          return interaction.editReply(`❌ ${result.error || 'Failed to remove user from event.'}`);
+        }
+      } else {
+        const result = await deleteUserCompletely(nickname, client);
+        if (result.success) {
+          logActivity(client, `User **${nickname}** has been completely deleted by [ **${interaction.user.tag}** ]`);
+          return interaction.editReply(`✅ User **${nickname}** has been completely deleted.`);
+        } else {
+          return interaction.editReply(`❌ ${result.error || 'Failed to delete user.'}`);
+        }
+      }
+    }
+
+    return interaction.editReply('Unknown subcommand.');
+  } catch (err) {
+    // last-resort safety
+    const msg = err?.message || String(err);
+    try {
+      if (interaction.deferred || interaction.replied) {
+        await interaction.editReply(`❌ Error: ${msg}`);
+      } else {
+        await interaction.reply({ content: `❌ Error: ${msg}`, ephemeral: true });
+      }
+    } catch {}
+  }
 }
 
 async function prepare() {
-    const events = await listEvents();
-    const users = await listUsers();
-    
-    const eventSubcommand = commandData.options.find(option => option.name === 'event');
-    const userSubcommand = commandData.options.find(option => option.name === 'user');
-    
-    // // Populate dynamic choices for events and users in the event subcommand
-    // const eventIdOptionForEvent = eventSubcommand.options.find(option => option.name === 'eventname');
-    // eventIdOptionForEvent.choices = events.map(event => ({
-    //     name: event.name,
-    //     value: event.name
-    // }));
-    
-    // // Populate dynamic choices for nickname in the user subcommand
-    // const nicknameOption = userSubcommand.options.find(option => option.name === 'nickname');
-    // nicknameOption.choices = users.map(user => ({
-    //     name: user.nickname,
-    //     value: user.nickname
-    // }));
-
-    // // Populate dynamic choices for eventname in the user subcommand
-    // const eventIdOptionForUser = userSubcommand.options.find(option => option.name === 'eventname');
-    // eventIdOptionForUser.choices = events.map(event => ({
-    //     name: event.name,
-    //     value: event.name
-    // }));
-
-    return commandData;
+  // (choices are provided by your global autocomplete; nothing to do here)
+  return commandData;
 }
 
 module.exports = {
-    data: commandData,
-    execute,
-    prepare
+  data: commandData,
+  execute,
+  prepare,
 };

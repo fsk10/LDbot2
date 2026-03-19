@@ -2,10 +2,12 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder } = require('discord.js');
 const { ChannelType } = require('discord.js');
 const { sequelize } = require('../database/database');
 const emailValidator = require("email-validator");
-const { TemporaryRegistration, UserModel, EventModel } = require('../models');
+const { TemporaryRegistration, UserModel, EventModel, EventUsersModel } = require('../models');
 const countries = require('../config/countryList');
 const { assignSeat, isNicknameAvailable } = require('../database/operations.js');
 const logger = require('../utils/logger');
+const { flagOrDash, buildAccountDetailsConfirmEmbed } = require('../utils/embeds');
+const { getRegistrationSnapshot } = require('../utils/registrationData');
 
 module.exports = {
     name: 'messageCreate',
@@ -30,7 +32,6 @@ module.exports = {
         }
 
         if (!tempReg) {
-            logger.error(`The ID ${message.author.id} does not exist in TemporaryRegistration.`);
             return;
         }    
 
@@ -61,7 +62,6 @@ module.exports = {
                         try {
                             await tempReg.save();
                         } catch (error) {
-                            logger.error("Error saving Temporary Registration:", error.message);
                             await message.author.send("An error occurred. Please try again later.");
                             return;
                         }                        
@@ -79,7 +79,6 @@ module.exports = {
                         try {
                             await tempReg.save();
                         } catch (error) {
-                            logger.error("Error saving Temporary Registration:", error.message);
                             await message.author.send("An error occurred. Please try again later.");
                             return;
                         } 
@@ -97,7 +96,6 @@ module.exports = {
                         try {
                             await tempReg.save();
                         } catch (error) {
-                            logger.error("Error saving Temporary Registration:", error.message);
                             await message.author.send("An error occurred. Please try again later.");
                             return;
                         } 
@@ -123,7 +121,6 @@ module.exports = {
                         try {
                             await tempReg.save();
                         } catch (error) {
-                            logger.error("Error saving Temporary Registration:", error.message);
                             await message.author.send("An error occurred. Please try again later.");
                             return;
                         } 
@@ -145,7 +142,6 @@ module.exports = {
                             try {
                                 await tempReg.save();
                             } catch (error) {
-                                logger.error("Error saving Temporary Registration:", error.message);
                                 await message.author.send("An error occurred. Please try again later.");
                                 return;
                             }
@@ -183,128 +179,143 @@ module.exports = {
                         break;
 
                     case 'confirmingCountry':
-                        // logger.info("Handling collectingCountryConfirm stage");
-
                         if (message.content.toLowerCase() === 'null') {
+                            // Apply a blank country
                             tempReg.unconfirmedCountry = null;
                             tempReg.country = null;
 
-                            // Move to the next registration stage.
-                            tempReg.stage = 'collectingPreferredSeats';
-                        
-                            try {
-                                await tempReg.save();  // Saving the stage change.
-                            } catch (error) {
-                                logger.error("Error saving Temporary Registration:", error.message);
+                            // If we're editing account only, DO NOT go to seat selection.
+                            if (tempReg.editMode === 'accountOnly') {
+                            tempReg.stage = 'showingAccountConfirm';
+                            try { await tempReg.save(); } catch (error) {
                                 await message.author.send("An error occurred. Please try again later.");
-                                return;
+                                break;
                             }
-                        
-                            // Notify the user of the next step.
+
+                            const snap = await getRegistrationSnapshot(message.author.id);
+                            const eventRow = await EventModel.findByPk(tempReg.eventId);
+
+                            const confirmEmbed = buildAccountDetailsConfirmEmbed({
+                                eventName: eventRow?.name || 'this event',
+                                snap,
+                                discordUsername: message.author.username,
+                            });
+
+                            const row = new ActionRowBuilder().addComponents(
+                                new ButtonBuilder().setCustomId('registration_continue').setLabel('Confirm').setStyle(3),
+                                new ButtonBuilder().setCustomId('registration_cancel').setLabel('Cancel').setStyle(4),
+                            );
+
+                            await message.author.send({ embeds: [confirmEmbed], components: [row] });
+                            break;
+                            }
+
+                            // Normal (not account-only): proceed to seat selection
+                            tempReg.stage = 'collectingPreferredSeats';
+                            try { await tempReg.save(); } catch (error) {
+                            await message.author.send("An error occurred. Please try again later.");
+                            break;
+                            }
+
                             const regPrefSeatsEmbed = new EmbedBuilder()
-                                .setTitle('Preferred Seats')
-                                .setDescription('Please provide your preferred seats for the event.\nFormated as a comma-separated list e.g. 3,11,29,...')
-                                .setColor('#0089E4');
+                            .setTitle('Preferred Seats')
+                            .setDescription('Please provide your preferred seats for the event.\nFormated as a comma-separated list e.g. 3,11,29,...')
+                            .setColor('#0089E4');
                             await message.author.send({ embeds: [regPrefSeatsEmbed] });
-                        }
-                         else {
-                            // If the message is not 'null' and not a button interaction (which is handled elsewhere), inform the user.
+                        } else {
                             await message.author.send(`Please respond using the provided buttons or type 'null' if you wish to set a blank country code.`);
                         }
                         break;
 
+
                     case 'collectingPreferredSeats':
-                        // ("Handling collectingPreferredSeats stage");
-                   
-                        // Fetch the event details to get the maximum seats
-                        const event = await EventModel.findOne({ where: { id: tempReg.eventId } });
-                        const eventExists = !!event;
-                    
-                        if (!eventExists) {
-                            logger.error(`Invalid eventId: ${tempReg.eventId}`);
-                            // You can send a message to the user or take other actions here.
-                            return;
-                        } 
-                    
-                        const seatsAvailable = event.seatsavailable; 
-                    
-                        // Filter out seat numbers that exceed the maximum
-                        const preferredSeats = message.content.split(',')
-                            .map(seat => parseInt(seat.trim()))
-                            .filter(seat => seat <= seatsAvailable);
-                    
-                        // If no valid seats remain after filtering
-                        if (preferredSeats.length === 0) {
-                            const regPrefSeatsInvalidMaxEmbed = new EmbedBuilder()
-                                .setTitle('Invalid Preferred Seats List')
-                                .setDescription(`All the seat numbers you provided exceed the maximum seat number of ${seatsAvailable}. Please provide a valid list of preferred seats.`)
-                                .setColor('#DD3601');
-                            await message.author.send({ embeds: [regPrefSeatsInvalidMaxEmbed] });
+                        if (tempReg.editMode === 'accountOnly') {
+                            await message.author.send('You are editing account details only. Please use the Confirm/Cancel buttons I sent.');
+                            break;
+                        }
 
-                            return;
-                        }                 
+                        const raw = (message.content || '').trim();
 
-                        // Check each preferred seat for availability
-                        let availableSeat;
+                        // Accept seat labels like "A-01, A-02"; keep original strings
+                        const preferred = raw
+                        .split(',')
+                        .map(s => s.trim())
+                        .filter(s => s.length > 0);
+
+                        if (preferred.length === 0) {
+                            const warn = new EmbedBuilder()
+                            .setTitle('No seats detected')
+                            .setDescription('Please provide your preferred seats as a comma-separated list, e.g. `3,11,29`.')
+                            .setColor('#DD3601');
+                            await message.author.send({ embeds: [warn] });
+                            break;
+                        }
+
+                        // Pick the first available seat
+                        let picked = null;
+                        for (const seat of preferred) {
+                            const taken = await EventUsersModel.findOne({
+                            where: { eventId: tempReg.eventId, seat }
+                            });
+                            if (!taken) { picked = seat; break; }
+                        }
+
+                        if (!picked) {
+                            const allTaken = new EmbedBuilder()
+                            .setTitle('Seats unavailable')
+                            .setDescription(
+                                'All of your preferred seats are currently taken.\n' +
+                                'Please send a new list, e.g. `7,8,15`.'
+                            )
+                            .setColor('#DD3601');
+                            await message.author.send({ embeds: [allTaken] });
+                            break;
+                        }
 
                         try {
-                            await sequelize.transaction(async (t) => {
-                                availableSeat = await assignSeat(message.author.id, tempReg.eventId, preferredSeats);
-                                
-                                if (availableSeat) {
-                                    tempReg.seat = availableSeat;
-                                    await tempReg.save({ transaction: t });
-                                }
-                            });
-                        } catch (error) {
-                            logger.error("Error in assigning seat:", error);
-                            await message.author.send("An error occurred while processing your seats. Please try again later.");
-                            return;
-                        }
-                    
-                        if (availableSeat) {
-                            tempReg.seat = availableSeat;
-                    
-                            // Create the embed
-                            const registrationEmbed = new EmbedBuilder()
-                                .setTitle('Registration Confirmation')
-                                .setColor('#FFA500')
-                                .setDescription('You are registering the following information.\nConfirm your registration by clicking on **Continue**.')
-                                .addFields(
-                                    { name: 'Nickname', value: tempReg.nickname },
-                                    { name: 'Firstname', value: tempReg.firstname },
-                                    { name: 'Lastname', value: tempReg.lastname },
-                                    { name: 'Email', value: tempReg.email },
-                                    { name: 'Country', value: `:flag_${tempReg.country.toLowerCase()}:` },
-                                    { name: 'Assigned Seat', value: tempReg.seat ? tempReg.seat.toString() : 'Not Assigned' }
-                                )
-                                .setFooter({ text: 'Please ensure all details are correct.' });
-                    
-                            // Create buttons
-                            const row = new ActionRowBuilder()
-                                .addComponents(
-                                    new ButtonBuilder()
-                                        .setCustomId('registration_cancel')
-                                        .setLabel('Cancel')
-                                        .setStyle(4),
-                                    new ButtonBuilder()
-                                        .setCustomId('registration_edit')
-                                        .setLabel('Edit responses')
-                                        .setStyle(1),
-                                    new ButtonBuilder()
-                                        .setCustomId('registration_continue')
-                                        .setLabel('Continue')
-                                        .setStyle(3)
-                                );
-                    
-                            tempReg.stage = 'showingConfirmation';
-                    
-                            // Send the embed
-                            await message.author.send({ embeds: [registrationEmbed], components: [row] });
-                        } else {
-                            await message.author.send("All preferred seats are taken. Please provide a different list of preferred seats.");
-                        }
-                        break;                                            
+                            const user = await UserModel.findOne({ where: { discorduser: message.author.id } });
+                            if (user && tempReg.eventId) {
+                                const exists = await EventUsersModel.findOne({
+                                where: { userId: user.id, eventId: tempReg.eventId },
+                                });
+                                if (exists) tempReg.editingExisting = true;
+                            }
+                        } catch (_) {}
+
+                        // Save chosen seat in the temp registration
+                        tempReg.seat = picked;
+                        tempReg.stage = 'showingConfirmation';
+                        await tempReg.save();
+
+                        // Build a proper confirmation embed with buttons (use snapshot so fields aren’t blank)
+                        const event = await EventModel.findByPk(tempReg.eventId);
+                        const snap  = await getRegistrationSnapshot(message.author.id);
+
+                        const confirm = new EmbedBuilder()
+                        .setTitle('Registration Confirmation')
+                        .setDescription('Please review your registration details again and confirm.')
+                        .setColor('#28B81C')
+                        .addFields(
+                            { name: '📍 Event', value: event?.name || String(tempReg.event || tempReg.eventId), inline: false },
+                            { name: '👾 Nickname', value: snap.nickname || '—', inline: true },
+                            { name: '👤 Discord User', value: message.author.username || '—', inline: true },
+                            { name: '🗺️ Country', value: flagOrDash(snap.country), inline: true },
+                            { name: '☝️ Firstname', value: snap.firstname || '—', inline: true },
+                            { name: '✌️ Lastname', value: snap.lastname || '—', inline: true },
+                            { name: '📧 Email', value: snap.email || '—', inline: true },
+                            { name: '🪑 Seat', value: `#${picked}`, inline: true },
+                        );
+
+                        const row = new ActionRowBuilder().addComponents(
+                        new ButtonBuilder().setCustomId('registration_continue').setLabel('Confirm').setStyle(3),
+                        new ButtonBuilder().setCustomId('registration_edit').setLabel('Edit responses').setStyle(1),
+                        new ButtonBuilder().setCustomId('registration_cancel').setLabel('Cancel').setStyle(4)
+                        );
+
+                        await message.author.send({ embeds: [confirm], components: [row] });
+
+                        break;
+                                     
                     
                     case 'editingExistingRegistration':
                         await message.author.send("Please use the buttons provided in the previous message to manage your registration.");

@@ -20,13 +20,25 @@ const path = require('node:path');
 const logger = require('./utils/logger');
 const { Client, Collection, Events, GatewayIntentBits } = require('discord.js');
 const { BOT_TOKEN } = require('./config.json');
+require('./models');
 const { initializeDatabase } = require('./database/database');
 const deployCommands = require('./deploy-commands');
 const cron = require('node-cron');
 const { releaseUnconfirmedSeats } = require('./database/operations');
+const { tickAnnounceJobs } = require('./scheduler/announcementsCron');
 
 // Run every 10 minutes
 cron.schedule('*/10 * * * *', releaseUnconfirmedSeats);
+
+// Schedule the countdown update to run every hour
+cron.schedule('0 * * * *', () => {
+    updateCountdownChannel(client).catch(err => logger.error(`Error updating countdown channel: ${err.message}`));
+});
+
+// Run the announcement scheduler every minute
+cron.schedule('* * * * *', () => {
+  try { tickAnnounceJobs(client); } catch (e) { logger.error('tickAnnounceJobs error:', e); }
+});
 
 const client = new Client({
   intents: [

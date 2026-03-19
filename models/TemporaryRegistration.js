@@ -67,6 +67,11 @@ module.exports = (sequelize) => {
                 type: DataTypes.BOOLEAN,
                 allowNull: true,
                 defaultValue: false
+            },
+            editMode: {
+                type: DataTypes.STRING,
+                allowNull: true,
+                field: 'edit_mode',
             }
         },
         {

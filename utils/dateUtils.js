@@ -1,30 +1,48 @@
+// utils/dateUtils.js
 const { DateTime } = require('luxon');
 const logger = require('./logger');
 
-function timeZoneNameToAbbr(timeZoneName) {
-    const mapping = {
-        "Central European Summer Time": "CEST",
-        "Central European Time": "CET"
-        // Add more mappings if needed
-    };
+const DEFAULT_TZ = 'Europe/Stockholm';
 
-    return mapping[timeZoneName] || timeZoneName;
+// ---- NEW: parse "YYYY-MM-DD HH:mm" (or ISO) in Stockholm, return JS Date in UTC
+function parseLocalToUTC(input, zone = DEFAULT_TZ) {
+  const s = String(input ?? '').trim();
+  // First try strict "yyyy-MM-dd HH:mm"
+  let dt = DateTime.fromFormat(s, 'yyyy-MM-dd HH:mm', { zone });
+  // Fallback to ISO (also interpreted in provided zone)
+  if (!dt.isValid) dt = DateTime.fromISO(s, { zone });
+  if (!dt.isValid) {
+    logger.error(`Invalid date input: ${input}`);
+    return null;
+  }
+  return dt.toUTC().toJSDate();
 }
 
-function formatDisplayDate(dateString) {
-    const dt = DateTime.fromJSDate(new Date(dateString)).setZone('Europe/Stockholm');
-    if (!dt.isValid) {
-        logger.error(`Invalid date string received: ${dateString}`);
-        logger.error(`Reason for invalid date: ${dt.invalidReason}`);
-        logger.error(`Explanation for invalid date: ${dt.invalidExplanation}`);
-        return "Invalid DateTime";
-    }
-
-    // Extract timezone abbreviation from native Date
-    const timeZoneName = new Date().toString().split('(')[1]?.split(')')[0] || "Unknown TZ";
-    const timeZoneAbbr = timeZoneNameToAbbr(timeZoneName);
-
-    return `${dt.toFormat('yyyy-MM-dd HH:mm')} ${timeZoneAbbr}`;
+// Existing formatter, keep behavior (and CET/CEST suffix)
+function formatDisplayDate(dateInput) {
+  const dt = DateTime.fromJSDate(new Date(dateInput)).setZone(DEFAULT_TZ);
+  if (!dt.isValid) {
+    logger.error(`Invalid date input: ${dateInput}`);
+    logger.error(`Reason: ${dt.invalidReason} — ${dt.invalidExplanation}`);
+    return 'Invalid DateTime';
+  }
+  const abbr = dt.isInDST ? 'CEST' : 'CET';
+  return `${dt.toFormat('yyyy-MM-dd HH:mm')} ${abbr}`;
 }
 
-module.exports = formatDisplayDate;
+// Nice discord-localized timestamp helper (optional)
+function toDiscordTimestamp(date, style = 'F') {
+  const ts = Math.floor(new Date(date).getTime() / 1000);
+  return `<t:${ts}:${style}>`;
+}
+
+/**
+ * IMPORTANT: keep default export compatible with your old `require(...)` usage.
+ * This lets `const formatDisplayDate = require('./dateUtils')` still work,
+ * while also allowing named imports.
+ */
+module.exports = Object.assign(formatDisplayDate, {
+  formatDisplayDate,
+  parseLocalToUTC,
+  toDiscordTimestamp,
+});

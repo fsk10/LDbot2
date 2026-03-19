@@ -51,6 +51,26 @@ module.exports = {
             required: false,
             extractionMethod: 'getString'
         },
+        {
+            name: 'paymentconfig',
+            type: 'STRING',
+            description: 'Payment config file (paymentConfig_*.json from /config)',
+            required: false,
+            autocomplete: true
+        },
+        {
+            name: 'adminrole',
+            description: 'Discord role that can manage this event',
+            type: 'ROLE',
+            required: false,
+            extractionMethod: 'getRole'
+        },
+        { 
+            type: 'BOOLEAN', 
+            name: 'regopen', 
+            description: 'Allow public registration?', 
+            required: false 
+        }
     ],
     user: [
         {

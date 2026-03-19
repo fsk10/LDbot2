@@ -17,3 +17,18 @@ logs/
 # Images
 images/*
 !images/SeatingMap.png.EXAMPLE
+
+# Database backups
+database/*.bak
+database/*.backup*
+database/db.backup_*
+
+# Temporary/local files
+checks_before.txt
+checks_after.txt
+db_snapshot.txt
+
+# Payment config (may contain sensitive data)
+config/paymentConfig.json
+config/paymentConfig_Belgium.json
+config/paymentConfig_Sweden.json
