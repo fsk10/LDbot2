@@ -5,6 +5,7 @@ const emailValidator = require("email-validator");
 const { TemporaryRegistration, UserModel, EventModel, EventUsersModel } = require('../models');
 const countries = require('../config/countryList');
 const { assignSeat, isNicknameAvailable } = require('../database/operations.js');
+const { loadChartById } = require('../utils/seating');
 const logger = require('../utils/logger');
 const { flagOrDash, buildAccountDetailsConfirmEmbed } = require('../utils/embeds');
 const { getRegistrationSnapshot } = require('../utils/registrationData');
@@ -245,14 +246,23 @@ module.exports = {
                             break;
                         }
 
-                        const invalidSeats = preferred.filter(s => !/^[a-zA-Z0-9\-]+$/.test(s) || s.length > 10);
-                        if (invalidSeats.length > 0) {
-                            const warn = new EmbedBuilder()
-                            .setTitle('Invalid seat format')
-                            .setDescription(`Invalid seat(s): \`${invalidSeats.join(', ')}\`\nSeats must be alphanumeric (e.g. \`3\`, \`A-01\`), max 10 characters.`)
-                            .setColor('#DD3601');
-                            await message.author.send({ embeds: [warn] });
-                            break;
+                        // Validate that seats exist in the seating chart
+                        try {
+                            const event = await EventModel.findByPk(tempReg.eventId);
+                            const chartId = event?.chartId || 'default';
+                            const { chart } = await loadChartById(chartId);
+                            const validSeatIds = new Set(chart.seats.map(s => String(s.id)));
+                            const nonExistentSeats = preferred.filter(s => !validSeatIds.has(s));
+                            if (nonExistentSeats.length > 0) {
+                                const warn = new EmbedBuilder()
+                                .setTitle('Seats not found')
+                                .setDescription(`The following seat(s) do not exist in the seating chart: \`${nonExistentSeats.join(', ')}\`\nPlease check the seating map and try again.`)
+                                .setColor('#DD3601');
+                                await message.author.send({ embeds: [warn] });
+                                break;
+                            }
+                        } catch (e) {
+                            logger.warn('Could not validate seats against chart:', e.message);
                         }
 
                         // Pick the first available seat

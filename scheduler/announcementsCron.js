@@ -4,6 +4,7 @@ const { DateTime } = require('luxon');
 const crypto = require('crypto');
 const logger = require('../utils/logger');
 const logActivity = require('../utils/logActivity');
+const { postAnnouncementForJob } = require('../commands/admin/adminannounce');
 const SETTINGS_KEY = 'announce_jobs';
 
 function makeId() {
@@ -114,7 +115,6 @@ async function tickAnnounceJobs(client) {
 
           // Post the announcement (uses your helper exported from adminannounce)
           try {
-            const { postAnnouncementForJob } = require('../commands/admin/adminannounce');
             await postAnnouncementForJob(client, event, job.channelId);
           } catch (e) {
             logger.error(`[announce-jobs] Post failed for job ${job.id}: ${e.message}`);
