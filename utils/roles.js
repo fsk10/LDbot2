@@ -1,5 +1,6 @@
 // utils/roles.js
 const { Collection } = require('discord.js');
+const logger = require('./logger');
 
 /** Extract a Discord snowflake from an id or mention. */
 function extractSnowflake(input) {
@@ -38,7 +39,9 @@ async function resolveRole(guild, input) {
     try {
       const fetched = await guild.roles.fetch(sf);
       if (fetched) return { role: fetched, id: fetched.id };
-    } catch (_) {}
+    } catch (e) {
+      logger.warn(`Failed to fetch role by ID ${sf}:`, e.message);
+    }
   }
 
   // 3) Fallback: exact name (case-insensitive) from cache
@@ -60,7 +63,9 @@ async function prettyRoleFromId(guild, roleId) {
   try {
     const fetched = await guild.roles.fetch(roleId);
     if (fetched) return `${fetched.name} (<@&${fetched.id}>)`;
-  } catch (_) {}
+  } catch (e) {
+    logger.warn(`Failed to fetch role by ID ${roleId}:`, e.message);
+  }
   return `(missing role) — ${roleId}`;
 }
 

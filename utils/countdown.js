@@ -6,6 +6,7 @@ const { Op } = require('sequelize');
 const { sequelize } = require('../database/database');
 let countdownConfig = require('../config/countdownConfig.js');
 const { Client } = require('discord.js');
+const logger = require('./logger');
 
 Settings.defaultZoneName = 'Europe/Stockholm';
 
@@ -18,9 +19,9 @@ async function updateCountdownChannel(client) {
     ? DateTime.fromISO(countdownConfig.manualEndDate)
     : await getNextUpcomingEventStartTime();
 
-  console.log(`Current time: ${startDate.toISO()}`);
-  console.log(`Manual end date: ${countdownConfig.manualEndDate || 'None'}`);
-  console.log(`Closest upcoming event start: ${endDate ? endDate.toISO() : 'None'}`);
+  logger.info(`Current time: ${startDate.toISO()}`);
+  logger.info(`Manual end date: ${countdownConfig.manualEndDate || 'None'}`);
+  logger.info(`Closest upcoming event start: ${endDate ? endDate.toISO() : 'None'}`);
 
   if (!endDate || endDate <= startDate) {
     return await setChannelName(client, countdownConfig.channel, 'No upcoming events');
@@ -36,7 +37,7 @@ async function updateCountdownChannel(client) {
   };
 
   const channelName = formatTimeRemainingForChannel(timeRemaining);
-  console.log(`Updating channel name to: ${channelName}`);
+  logger.info(`Updating channel name to: ${channelName}`);
   return await setChannelName(client, countdownConfig.channel, channelName);
 }
 
@@ -48,7 +49,7 @@ async function scheduleCountdownUpdate(client) {
   countdownConfig = reloadConfig();
 
   if (!countdownConfig.isEnabled || !countdownConfig.channel) {
-    console.log('Countdown updates are disabled or no channel is set.');
+    logger.info('Countdown updates are disabled or no channel is set.');
     if (timeoutHandler) clearTimeout(timeoutHandler);
     return;
   }
@@ -61,7 +62,7 @@ async function scheduleCountdownUpdate(client) {
   // Default: if we have no events, check again later anyway (don’t stop)
   let delayEventBased;
   if (!nextEventStart) {
-    console.log('No upcoming events found.');
+    logger.info('No upcoming events found.');
     // set channel to "No upcoming events" (non-blocking rename already handled inside updateCountdownChannel)
     await setChannelName(client, countdownConfig.channel, 'No upcoming events');
 
@@ -98,7 +99,7 @@ async function scheduleCountdownUpdate(client) {
     updateCountdownChannel(client).then(() => scheduleCountdownUpdate(client));
   }, delayUntilNextUpdate);
 
-  console.log(`Next countdown update scheduled in ${delayUntilNextUpdate} milliseconds.`);
+  logger.info(`Next countdown update scheduled in ${delayUntilNextUpdate} milliseconds.`);
 }
 
 
@@ -109,7 +110,7 @@ async function scheduleCountdownUpdate(client) {
 async function getNextUpcomingEventStartTime() {
   try {
     const now = new Date();
-    console.log('Fetching the closest event that STARTS after:', now);
+    logger.info('Fetching the closest event that STARTS after:', now);
 
     const event = await EventModel.findOne({
       where: {
@@ -119,15 +120,15 @@ async function getNextUpcomingEventStartTime() {
     });
 
     if (event) {
-      console.log('Next upcoming event found:', { id: event.id, name: event.name, start: event.startdate, end: event.enddate });
+      logger.info('Next upcoming event found:', { id: event.id, name: event.name, start: event.startdate, end: event.enddate });
       // Countdown target is the START of the next event
       return DateTime.fromJSDate(event.startdate);
     } else {
-      console.log('No upcoming events found.');
+      logger.info('No upcoming events found.');
       return null;
     }
   } catch (error) {
-    console.error('Error fetching next upcoming event start time:', error);
+    logger.error('Error fetching next upcoming event start time:', error);
     return null;
   }
 }
@@ -139,7 +140,7 @@ async function getNextUpcomingEventStartTime() {
 async function getActiveEventEndTime() {
   try {
     const now = new Date();
-    console.log('Fetching the closest event that is ACTIVE at:', now);
+    logger.info('Fetching the closest event that is ACTIVE at:', now);
 
     const event = await EventModel.findOne({
       where: {
@@ -150,14 +151,14 @@ async function getActiveEventEndTime() {
     });
 
     if (event) {
-      console.log('Active event found:', { id: event.id, name: event.name, start: event.startdate, end: event.enddate });
+      logger.info('Active event found:', { id: event.id, name: event.name, start: event.startdate, end: event.enddate });
       return DateTime.fromJSDate(event.enddate);
     } else {
-      console.log('No active events found.');
+      logger.info('No active events found.');
       return null;
     }
   } catch (error) {
-    console.error('Error fetching active event end time:', error);
+    logger.error('Error fetching active event end time:', error);
     return null;
   }
 }
@@ -187,28 +188,28 @@ function getRenameCooldownRemainingMs() {
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 async function setChannelName(client, channelId, name, { timeoutMs = 3000 } = {}) {
-  console.log('Fetching channel...');
+  logger.info('Fetching channel...');
   try {
     const nowMs = Date.now();
     if (renameCooldownUntil && nowMs < renameCooldownUntil) {
       const retryMs = renameCooldownUntil - nowMs;
-      console.log(`Rename on cooldown for ${retryMs} ms; skipping rename to '${name}'.`);
+      logger.info(`Rename on cooldown for ${retryMs} ms; skipping rename to '${name}'.`);
       return { code: 'cooldown', retryMs };
     }
 
     const channel = await client.channels.fetch(channelId);
-    console.log('Channel fetched:', channel?.name || '(unknown)');
+    logger.info('Channel fetched:', channel?.name || '(unknown)');
     if (!channel) {
-      console.error('Channel not found.');
+      logger.error('Channel not found.');
       return { code: 'error', details: 'Channel not found' };
     }
 
     if (channel.name === name) {
-      console.log('Channel name is already up to date.');
+      logger.info('Channel name is already up to date.');
       return { code: 'nochange' };
     }
 
-    console.log(`Updating channel name from '${channel.name}' to '${name}'`);
+    logger.info(`Updating channel name from '${channel.name}' to '${name}'`);
 
     const renamePromise = channel.setName(name);
     const timedOut = await Promise.race([
@@ -219,11 +220,11 @@ async function setChannelName(client, channelId, name, { timeoutMs = 3000 } = {}
     if (timedOut) {
       const backoffMs = 10 * 60 * 1000; // 10 minutes
       renameCooldownUntil = Date.now() + backoffMs;
-      console.warn(`Rename timed out after ${timeoutMs} ms. Backing off for ${backoffMs} ms.`);
+      logger.warn(`Rename timed out after ${timeoutMs} ms. Backing off for ${backoffMs} ms.`);
       return { code: 'timeout', retryMs: backoffMs };
     }
 
-    console.log('Channel name updated successfully.');
+    logger.info('Channel name updated successfully.');
     return { code: 'updated' };
 
   } catch (error) {
@@ -233,14 +234,14 @@ async function setChannelName(client, channelId, name, { timeoutMs = 3000 } = {}
     if (status === 429) {
       const ms = Math.max((retryAfterSec ? Number(retryAfterSec) * 1000 : 10 * 60 * 1000), 60 * 1000);
       renameCooldownUntil = Date.now() + ms;
-      console.warn(`Hit rate limit (429). Backing off for ${ms} ms.`);
+      logger.warn(`Hit rate limit (429). Backing off for ${ms} ms.`);
       return { code: 'rate_limited', retryMs: ms };
     }
     if (status === 50013) {
-      console.error('Missing permissions to rename channel (50013).');
+      logger.error('Missing permissions to rename channel (50013).');
       return { code: 'missing_perms' };
     }
-    console.error('Failed to set channel name:', error);
+    logger.error('Failed to set channel name:', error);
     return { code: 'error', details: String(error?.message || error) };
   }
 }
