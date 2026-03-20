@@ -1,15 +1,13 @@
 const { SlashCommandBuilder } = require('@discordjs/builders');
 const { EmbedBuilder, ChannelType } = require('discord.js');
 const { isAdmin } = require('../../utils/permissions');
-const { updateCountdownChannel, scheduleCountdownUpdate, reloadConfig } = require('../../utils/countdown');
+const { updateCountdownChannel, scheduleCountdownUpdate, loadCountdownConfig } = require('../../utils/countdown');
+const { SettingsModel } = require('../../models');
 const { DateTime } = require('luxon');
-const fs = require('fs');
-const path = require('path');
 const logger = require('../../utils/logger');
 const logActivity = require('../../utils/logActivity');
 
-const countdownConfigPath = path.join(__dirname, '../../config/countdownConfig.js');
-let countdownConfig = require(countdownConfigPath);
+const COUNTDOWN_SETTINGS_KEY = 'countdown_config';
 
 const commandData = new SlashCommandBuilder()
   .setName('admincountdown')
@@ -85,6 +83,14 @@ function humanizeRenameStatus(status) {
   }
 }
 
+async function saveCountdownConfig(config) {
+  await SettingsModel.upsert({
+    key: COUNTDOWN_SETTINGS_KEY,
+    value: JSON.stringify(config),
+    description: 'Countdown channel configuration',
+  });
+}
+
 async function execute(interaction, client) {
   // Permission gate
   const userIsAdmin = await isAdmin(interaction);
@@ -98,8 +104,7 @@ async function execute(interaction, client) {
 
   await interaction.deferReply({ ephemeral: true });
 
-  // Always reload the config at the start of each run
-  countdownConfig = reloadConfig();
+  let countdownConfig = await loadCountdownConfig();
 
   const subcommand = interaction.options.getSubcommand();
   let replyMessage = '';
@@ -108,7 +113,7 @@ async function execute(interaction, client) {
     switch (subcommand) {
       case 'enable': {
         countdownConfig.isEnabled = true;
-        saveCountdownConfig(countdownConfig);
+        await saveCountdownConfig(countdownConfig);
         const status = await updateCountdownChannel(client);
         await scheduleCountdownUpdate(client);
         replyMessage = 'Countdown feature has been **enabled**.';
@@ -120,7 +125,7 @@ async function execute(interaction, client) {
 
       case 'disable': {
         countdownConfig.isEnabled = false;
-        saveCountdownConfig(countdownConfig);
+        await saveCountdownConfig(countdownConfig);
         await scheduleCountdownUpdate(client); // cancels/adjusts timer, sets "No upcoming events"
         replyMessage = 'Countdown feature has been **disabled**.';
         // No rename attempted here; nothing to append.
@@ -135,7 +140,7 @@ async function execute(interaction, client) {
           break;
         }
         countdownConfig.channel = channel.id;
-        saveCountdownConfig(countdownConfig);
+        await saveCountdownConfig(countdownConfig);
         const status = await updateCountdownChannel(client);
         await scheduleCountdownUpdate(client);
         replyMessage = `Countdown channel set to <#${countdownConfig.channel}>.`;
@@ -151,7 +156,7 @@ async function execute(interaction, client) {
         if (!datetimeString) {
           // Clear manual date
           countdownConfig.manualEndDate = null;
-          saveCountdownConfig(countdownConfig);
+          await saveCountdownConfig(countdownConfig);
           const status = await updateCountdownChannel(client);
           await scheduleCountdownUpdate(client);
           replyMessage = 'Manual end date has been **cleared**.';
@@ -168,8 +173,8 @@ async function execute(interaction, client) {
         }
 
         countdownConfig.manualEndDate = dt.toISO();
-        // Do NOT flip useClosestEvent here; that’s controlled via /admincountdown useevent
-        saveCountdownConfig(countdownConfig);
+        // Do NOT flip useClosestEvent here; that's controlled via /admincountdown useevent
+        await saveCountdownConfig(countdownConfig);
         const status = await updateCountdownChannel(client);
         await scheduleCountdownUpdate(client);
         replyMessage = `Manual end date set to **${dt.toFormat('yyyy-MM-dd HH:mm')}**.`;
@@ -186,7 +191,7 @@ async function execute(interaction, client) {
           // When switching to event-based, clear manual override to avoid confusion
           countdownConfig.manualEndDate = null;
         }
-        saveCountdownConfig(countdownConfig);
+        await saveCountdownConfig(countdownConfig);
         const status = await updateCountdownChannel(client);
         await scheduleCountdownUpdate(client);
 
@@ -204,8 +209,6 @@ async function execute(interaction, client) {
       }
 
       case 'status': {
-        countdownConfig = reloadConfig();
-
         let channelInfo = 'Not Set';
         if (countdownConfig.channel) {
           try {
@@ -263,11 +266,6 @@ async function execute(interaction, client) {
     .setColor('#0099ff');
 
   await interaction.editReply({ embeds: [embed], ephemeral: true });
-}
-
-function saveCountdownConfig(config) {
-  // Persist as CommonJS module so reloadConfig() works
-  fs.writeFileSync(countdownConfigPath, `module.exports = ${JSON.stringify(config, null, 4)};`);
 }
 
 module.exports = {

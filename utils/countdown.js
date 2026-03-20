@@ -1,17 +1,27 @@
 const { DateTime, Settings } = require('luxon');
-const fs = require('fs');
-const path = require('path');
-const { EventModel } = require('../models');
+const { EventModel, SettingsModel } = require('../models');
 const { Op } = require('sequelize');
 const { sequelize } = require('../database/database');
-let countdownConfig = require('../config/countdownConfig.js');
 const { Client } = require('discord.js');
 const logger = require('./logger');
 
 Settings.defaultZoneName = 'Europe/Stockholm';
 
+const COUNTDOWN_SETTINGS_KEY = 'countdown_config';
+const DEFAULT_COUNTDOWN_CONFIG = { isEnabled: false, channel: null, manualEndDate: null, useClosestEvent: true };
+
+async function loadCountdownConfig() {
+  try {
+    const row = await SettingsModel.findOne({ where: { key: COUNTDOWN_SETTINGS_KEY } });
+    if (!row) return { ...DEFAULT_COUNTDOWN_CONFIG };
+    return JSON.parse(row.value);
+  } catch {
+    return { ...DEFAULT_COUNTDOWN_CONFIG };
+  }
+}
+
 async function updateCountdownChannel(client) {
-  countdownConfig = reloadConfig();
+  const countdownConfig = await loadCountdownConfig();
   if (!countdownConfig.isEnabled || !countdownConfig.channel) return { code: 'disabled' };
 
   const startDate = DateTime.now();
@@ -45,8 +55,7 @@ async function updateCountdownChannel(client) {
 let timeoutHandler;
 
 async function scheduleCountdownUpdate(client) {
-  // Always reload first
-  countdownConfig = reloadConfig();
+  const countdownConfig = await loadCountdownConfig();
 
   if (!countdownConfig.isEnabled || !countdownConfig.channel) {
     logger.info('Countdown updates are disabled or no channel is set.');
@@ -59,7 +68,7 @@ async function scheduleCountdownUpdate(client) {
 
   const now = DateTime.now().setZone('Europe/Stockholm');
 
-  // Default: if we have no events, check again later anyway (don’t stop)
+  // Default: if we have no events, check again later anyway (don't stop)
   let delayEventBased;
   if (!nextEventStart) {
     logger.info('No upcoming events found.');
@@ -257,13 +266,8 @@ function formatTimeRemainingForChannel(timeRemaining) {
   return `${minutes} minute${minutes > 1 ? 's' : ''}`;
 }
 
-function reloadConfig() {
-  delete require.cache[require.resolve('../config/countdownConfig.js')];
-  return require('../config/countdownConfig.js');
-}
-
 module.exports = {
   updateCountdownChannel,
   scheduleCountdownUpdate,
-  reloadConfig,
+  loadCountdownConfig,
 };

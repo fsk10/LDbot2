@@ -3,8 +3,10 @@ const { ChannelType } = require('discord.js');
 const logger = require('./logger');
 
 async function logActivity(client, message) {
+    let channelId = 'unknown';
     try {
         const logChannelId = await getSetting('logChannel');
+        channelId = logChannelId?.value ?? 'not set';
         if (!logChannelId || !logChannelId.value) {
             logger.warn("Log channel not set in the settings.");
             return;
@@ -19,7 +21,8 @@ async function logActivity(client, message) {
         await logChannel.send(message);
 
     } catch (error) {
-        logger.error("Error occurred while logging activity:", error);
+        const code = error?.code ?? error?.status ?? 'unknown';
+        logger.error(`Error occurred while logging activity (channel: ${channelId}, code: ${code}): ${error?.message ?? error}`);
     }
 }
 

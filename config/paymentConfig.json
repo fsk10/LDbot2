@@ -1,0 +1,24 @@
+{
+    "currency": "EUR",
+    "methods": [
+        {
+            "type": "PayPal",
+            "value": "TBA",
+            "inline": true
+        },
+        {
+            "type": "Revolut",
+            "value": "TBA",
+            "inline": true
+        },
+        {
+            "type": "Bank transfer",
+            "value": "TBA",
+            "inline": false
+        }
+    ],
+    "notes": {
+        "beforeList": ":euro: You will **not** be added to the events participant list until you have paid the entry fee.\n\n:chair: Your seat will be reserved for __14 days__ and will then be made available for other participants to claim!\n\n:money_with_wings: You can receive a refund (in case of dropout) up until 60 days before the event start date.",
+        "afterList": "```\nMake sure that we receive the full entry fee sum. \nIf you pay by PayPal make sure to send it to \"Family and friends\" to avoid added fees.\n```"
+    }
+}

@@ -23,12 +23,16 @@ database/*.bak
 database/*.backup*
 database/db.backup_*
 
-# Temporary/local files
-checks_before.txt
-checks_after.txt
-db_snapshot.txt
+# SQLite WAL journal files
+database/db.sqlite-shm
+database/db.sqlite-wal
+
+# Claude Code workspace files
+.claude/
+
+# Local notes
+todo.txt
 
 # Payment config (may contain sensitive data)
-config/paymentConfig.json
 config/paymentConfig_Belgium.json
 config/paymentConfig_Sweden.json

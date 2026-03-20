@@ -1,87 +1,102 @@
-# LDbot2 - Discord Bot
+# LDbot2 - Discord Event Bot
 
-LDbot2 is a Discord bot designed for managing and organizing events. 
+LDbot2 is a Discord bot for managing and organizing LAN events — handling registrations, seating, payments, and announcements.
 
-**Disclaimer:** 
-This bot was developed entirely with the help of ChatGPT for a specific, personal project and is made public for reference purposes only. The repository does not offer support, guarantees, or warranties for its functionality outside of its original intent. If you choose to utilize or modify the code, do so at your own risk.
+> **Note:** This project is made public for reference purposes only and does not offer support, guarantees, or warranties outside of its original intent. Use or modify at your own risk.
+
+---
 
 ## Features
-**Legend**:
 
-:white_check_mark: Completed :construction: In-Progress :calendar: Planned
+- **Event management** — Create, edit, delete and list events with location, dates, seat capacity and entry fee
+- **User registration** — Multi-step DM-based registration flow with nickname, personal details, country and seat selection
+- **Seating charts** — Visual seating maps generated dynamically during registration and in the participant channel
+- **Participant list** — Auto-updated participant list posted to a designated event channel
+- **Reserve list** — Automatic reserve queue when seat capacity is reached
+- **Payment tracking** — Track payment status per user per event
+- **Announcements** — Post or schedule event announcements with a Register button
+- **Countdown channel** — Automatic Discord channel name countdown to the next event
+- **Event-scoped admins** — Assign an admin role per event for delegated management
+- **Activity logging** — All admin actions logged to a designated log channel
+- **Automated backups** — Scheduled SQLite database backups with configurable retention
 
-- **Slash Commands**: Utilizes Discord's slash command feature for intuitive and easy command execution.
+---
 
+## Requirements
 
-- **Admin Management**:
-  - **Settings** 
-    * :white_check_mark: **Simple Permissions System:** Define an admin-role for full bot admin permissions. 
-    * :white_check_mark: **Logging:** Logging of bot activities and interactions to defined logging-channel.
-  - **Events**
-    * :white_check_mark: **Create events**
-    * :white_check_mark: **Edit events**
-    * :white_check_mark: **Delete event**
-    * :white_check_mark: **List events**
-    * :calendar: **Notifications:** Send out notifications for upcoming events & registration info.
-  - **Users**
-  	* :white_check_mark: **Add users to events**
-  	  * :white_check_mark: **Dynamic participantslist:** Generate dynamic event participants-list in defined event-channel.
-  	  * :white_check_mark: **Dynamic seating map:** Generate dynamic seating map in the participants channel and during user seat registration.
-  	  * :white_check_mark: **Reserves list:** Add users to an event reserveslist when participant seat limit is reached.
-    * :white_check_mark: **Edit user details**
-    * :white_check_mark: **Remove users from events**
-    * :white_check_mark: **List users in events**
+- Node.js v18 or later
+- npm
+- A Discord bot application ([guide](https://discordjs.guide/preparations/setting-up-a-bot-application.html))
+- PM2 (recommended for production)
 
+---
 
-- **User Commands**:
-	* :white_check_mark: **Register for event:** *Command for users to signup to events*
-	* :white_check_mark: **Edit registration:** *Functionality for users to edit their own user and event registration details (built into the register command)*
-	* :white_check_mark: **Unregister from event:** *Command for users to leave/remove themselves from an event*
-   * :white_check_mark: **View event & user Status info:** *Command for users to show some short event and user registration details*
-
-#
-### Installation
+## Installation
 
 1. Clone the repository:
    ```bash
    git clone https://github.com/fsk10/LDbot2.git
-    ```
-2. Navigate to the project directory:
-   ```bash
    cd LDbot2
    ```
-3. Install dependencies:
+
+2. Install dependencies:
    ```bash
    npm install
    ```
-4. Set up the bot in the discord developer portal:
-   https://discordjs.guide/preparations/setting-up-a-bot-application.html
-   
-5. Create a config.json file in the root directory and add BOT_TOKEN, SERVER_ID (GUILD), CLIENT_ID (APPLICATION ID) and the BOT OWNER ID:
-   ```bash
+
+3. Create `config.json` in the root directory:
+   ```json
    {
-    "BOT_TOKEN":	"",
-    "SERVER_ID":	"",
-    "CLIENT_ID":    "",
-    "BOT_OWNER_ID":	"" 
+     "BOT_TOKEN": "",
+     "SERVER_ID": "",
+     "CLIENT_ID": "",
+     "BOT_OWNER_ID": ""
    }
    ```
-6. Run the bot:
+
+4. Review `config/paymentConfig.json` and adjust the default payment methods to fit your needs. For venue-specific overrides, create `config/paymentConfig_<venue>.json` with the same structure and assign it per event.
+
+5. Start the bot:
    ```bash
    node app.js
    ```
-#   
-### Usage *(In-progress)*
+   Or with PM2:
+   ```bash
+   pm2 start app.js --name LDbot2
+   ```
 
-| Command | Description | Example |
-| ------- | ----------- | ------- |
-| `/adminget <setting>` | .... | `....` |
-| `/adminset <setting> <value>` | .... | `....` |
-| `/adminadd <event\|user>` | .... | `....` |
-| `/adminedit <event\|user\|eventuser>` | .... | `....` |
-| `/admindel <event\|user>` | .... | `....` |
-| `/adminlist <events\|users>` | .... | `....` |
-| `/register <event>` | .... | `....` |
-| `/unregister <event>` | .... | `....` |
-| `/status` .| .... | `....` |
-| ....      | ....         | ....     |
+---
+
+## Commands
+
+### Admin Commands
+
+| Command | Description |
+|---------|-------------|
+| `/adminset <setting> <value>` | Configure bot settings (admin role, log channel) |
+| `/adminget <setting>` | Get current value of a bot setting |
+| `/adminadd event` | Create a new event |
+| `/adminadd user` | Add a user to the system |
+| `/adminadd eventuser` | Add a user to a specific event |
+| `/adminedit event` | Edit event details |
+| `/adminedit user` | Edit user account details |
+| `/adminedit eventuser` | Edit a user's seat, payment or reserve status |
+| `/admindel event` | Delete an event |
+| `/admindel user` | Remove a user from an event or delete entirely |
+| `/adminlist events` | List all events |
+| `/adminlist users` | List users, optionally filtered by event |
+| `/adminannounce` | Post or schedule an event announcement |
+| `/adminchart` | Manage seating charts |
+| `/admincountdown` | Configure the countdown channel |
+| `/adminbackup` | Configure and trigger database backups |
+| `/admindownloadimages` | Bulk download images from a channel |
+| `/admindownloadmedia` | Bulk download media from a channel |
+| `/eventadmin` | Event-scoped admin commands (list, seat, paid, reserve, unregister, regopen) |
+
+### User Commands
+
+| Command | Description |
+|---------|-------------|
+| `/register <event>` | Register for an event (includes edit flow for returning users) |
+| `/unregister <event>` | Remove yourself from an event |
+| `/status` | View upcoming events and your registration status |
