@@ -36,3 +36,6 @@ todo.txt
 # Payment config (may contain sensitive data)
 config/paymentConfig_Belgium.json
 config/paymentConfig_Sweden.json
+
+# Generated seating charts
+charts/

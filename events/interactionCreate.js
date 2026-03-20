@@ -1,4 +1,5 @@
 const { Events, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ChannelType } = require('discord.js');
+const { DateTime } = require('luxon');
 const { Sequelize } = require('sequelize');
 const path = require('path');
 const fs = require('fs');
@@ -124,6 +125,12 @@ module.exports = {
 
         case 'adminlist':
           if (interaction.options.getSubcommand() === 'users' && focusedOptionName === 'event') {
+            await handleEventAutocomplete(interaction);
+          }
+          break;
+
+        case 'adminstats':
+          if (focusedOptionName === 'event') {
             await handleEventAutocomplete(interaction);
           }
           break;
@@ -614,6 +621,51 @@ module.exports = {
                 }
             }
             return;
+        }
+
+        if (customId.startsWith('stats_unpaid_') || customId.startsWith('stats_reserve_')) {
+          const isUnpaid = customId.startsWith('stats_unpaid_');
+          const eventId = customId.replace(isUnpaid ? 'stats_unpaid_' : 'stats_reserve_', '');
+          const event = await EventModel.findByPk(eventId);
+
+          const rows = await EventUsersModel.findAll({
+            where: isUnpaid
+              ? { eventId, haspaid: false, reserve: false }
+              : { eventId, reserve: true },
+            include: [{ model: UserModel, as: 'user' }],
+            order: isUnpaid ? [['seat', 'ASC']] : [['createdAt', 'ASC']],
+          });
+
+          const title = isUnpaid
+            ? `⏳ Unpaid — ${event?.name || 'Event'}`
+            : `👥 Reserve — ${event?.name || 'Event'}`;
+
+          const lines = rows.map((r, i) => {
+            const flag = r.user?.country ? `:flag_${r.user.country.toLowerCase()}:` : '🏳️';
+            const nick = r.user?.nickname || '?';
+            const num = String(i + 1).padStart(2, '0');
+            if (isUnpaid) {
+              const seat = r.seat ? `  #${r.seat}` : '';
+              const regDate = r.createdAt
+                ? DateTime.fromJSDate(r.createdAt).toFormat('yyyy-MM-dd')
+                : '?';
+              return `${num}. ${flag} ${nick}${seat}  *(registered ${regDate})*`;
+            }
+            return `${num}. ${flag} ${nick}`;
+          });
+
+          const listEmbed = new EmbedBuilder()
+            .setTitle(title)
+            .setColor('#0089E4')
+            .setDescription(lines.length > 0 ? lines.join('\n') : 'None.');
+
+          try {
+            await interaction.update({ components: [] });
+          } catch {
+            await interaction.deferUpdate().catch(() => {});
+          }
+          await interaction.followUp({ embeds: [listEmbed], ephemeral: true });
+          return;
         }
 
         if (customId === 'cancel_unregistration') {
