@@ -7,12 +7,6 @@
  @description: LANet Deluxe event-bot
 */
 
-for (const module in require.cache) {
-    if (require.cache[module].id.endsWith('.js')) {
-        delete require.cache[module];
-    }
-}
-
 global.ongoingRegistrations = {};
 
 const fs = require('node:fs');
@@ -26,6 +20,7 @@ const deployCommands = require('./deploy-commands');
 const cron = require('node-cron');
 const { releaseUnconfirmedSeats } = require('./database/operations');
 const { tickAnnounceJobs } = require('./scheduler/announcementsCron');
+const { updateCountdownChannel } = require('./utils/countdown');
 
 // Run every 10 minutes
 cron.schedule('*/10 * * * *', releaseUnconfirmedSeats);

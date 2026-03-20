@@ -50,9 +50,9 @@ module.exports = {
       try {
         await command.execute(interaction, interaction.client);
       } catch (error) {
-        if (error instanceof Sequelize.ValidationError) {
-          for (const ve of error.errors) {
-          }
+        logger.error(`Error executing command "${interaction.commandName}":`, error);
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: 'Ett fel uppstod när kommandot kördes.', ephemeral: true }).catch(() => {});
         }
       }
       return;
@@ -1355,7 +1355,7 @@ async function handleUnregisterAutocomplete(interaction) {
 
     await interaction.respond(eventNames);
   } catch (error) {
-    console.error('Error in handleUnregisterAutocomplete:', error.message, error.stack);
+    logger.error('Error in handleUnregisterAutocomplete:', error.message, error.stack);
   }
 }
 

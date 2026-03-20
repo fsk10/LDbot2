@@ -16,7 +16,7 @@ async function logActivity(client, message) {
             return;
         }        
     
-        logChannel.send(message)
+        await logChannel.send(message);
 
     } catch (error) {
         logger.error("Error occurred while logging activity:", error);
