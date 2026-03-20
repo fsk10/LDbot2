@@ -247,8 +247,8 @@ async function deleteEvent(eventId) {
     // 1) Clean up any in-progress registrations (best-effort)
     try {
       await TemporaryRegistration.destroy({ where: { eventId }, transaction: t });
-    } catch (_) {
-      // ignore if table/column not present in older DBs
+    } catch (e) {
+      logger.warn('Could not clean up TemporaryRegistration during event delete (may not exist):', e.message);
     }
 
     // 2) Delete join-table rows referencing the event
@@ -490,27 +490,6 @@ async function checkUserInEvent(discordUserId, eventId) {
 }
 
 /* -------------------- Registration flow helpers -------------------- */
-
-async function handleDatabaseOperations(interaction, collectedData, eventName) {
-  let user = await UserModel.findOne({ where: { discorduser: interaction.user.id } });
-
-  if (!user) {
-    user = await UserModel.create({
-      discorduser: interaction.user.id,
-      nickname: collectedData.nickname,
-      firstname: collectedData.firstname,
-      // ... other fields as needed
-    });
-  }
-
-  const event = await EventModel.findOne({ where: { name: eventName } });
-
-  await EventUsersModel.create({
-    userId: user.id,
-    eventId: event.id,
-    preferredseats: collectedData.preferredSeats
-  });
-}
 
 async function assignSeat(userId, eventId, preferredSeats) {
   if (!preferredSeats || preferredSeats.length === 0) {
@@ -954,7 +933,6 @@ module.exports = {
   updateEvent,
   updateUser,
   updateEventUser,
-  handleDatabaseOperations,
   assignSeat,
   releaseUnconfirmedSeats,
   fetchOccupiedSeatsForEvent,

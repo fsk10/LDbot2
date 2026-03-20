@@ -43,8 +43,6 @@ module.exports = {
             if (tempReg && tempReg.stage) {
                 switch (tempReg.stage) {
                     case 'collectingNickname':
-                        // logger.info("Handling collectingNickname stage");
-
                         // Use the isNicknameAvailable function to validate the nickname
                         const isNicknameValid = await isNicknameAvailable(message.author.id, message.content);
                         
@@ -73,7 +71,6 @@ module.exports = {
                         break;
 
                     case 'collectingFirstname':
-                        // logger.info("Handling collectingFirstname stage");
                         tempReg.firstname = message.content;
                         tempReg.stage = 'collectingLastname';
                         try {
@@ -90,7 +87,6 @@ module.exports = {
                         break;
 
                     case 'collectingLastname':
-                        // logger.info("Handling collectingLastname stage");
                         tempReg.lastname = message.content;
                         tempReg.stage = 'collectingEmail';
                         try {
@@ -107,7 +103,6 @@ module.exports = {
                         break;
 
                     case 'collectingEmail':
-                        // logger.info("Handling collectingEmail stage");
                         if (!emailValidator.validate(message.content)) {                           
                             const regEmailInvalidEmbed = new EmbedBuilder()
                                 .setTitle('Invalid E-mail Format')
@@ -132,7 +127,6 @@ module.exports = {
                         break;
 
                     case 'collectingCountry':
-                        // logger.info("Handling collectingCountry stage");
                         const providedCountryCode = message.content.toUpperCase();
                         const country = countries.find(c => c.value === providedCountryCode);
                         
