@@ -749,9 +749,16 @@ module.exports = {
             return interaction.reply({ embeds: [emb], ephemeral: true });
           }
 
-          // Mark account-only edit and start at nickname
-          temp.editMode = 'accountOnly';
-          temp.editingExisting = true;        // also mark “editing” so we suppress congrats later
+          // Only skip seat selection if the user already has a registration for this event
+          const userRow = await UserModel.findOne({ where: { discorduser: userId } });
+          const existingReg = userRow
+            ? await EventUsersModel.findOne({ where: { userId: userRow.id, eventId: temp.eventId } })
+            : null;
+
+          if (existingReg) {
+            temp.editMode = 'accountOnly';  // preserve seat, skip seat selection
+            temp.editingExisting = true;    // suppress congrats message
+          }
           temp.stage = 'collectingNickname';
           await temp.save();
 
@@ -841,11 +848,12 @@ module.exports = {
                 where: { userId: user.id, eventId: temp.eventId },
               });
               if (existing) {
-                await existing.update({
-                  seat:   temp.seat,
-                  status: 'confirmed',
-                  reserve: isReserve,
-                });
+                const updateFields = { status: 'confirmed' };
+                if (temp.editMode !== 'accountOnly') {
+                  updateFields.seat = temp.seat;
+                  updateFields.reserve = isReserve;
+                }
+                await existing.update(updateFields);
               } else {
                 await EventUsersModel.create({
                   userId:  user.id,

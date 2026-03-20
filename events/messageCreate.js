@@ -56,6 +56,16 @@ module.exports = {
                             return;
                         }
 
+                        const forbiddenChars = /[`*_~|]/;
+                        if (forbiddenChars.test(message.content)) {
+                            const embed = new EmbedBuilder()
+                                .setTitle('Invalid nickname')
+                                .setDescription('Your nickname contains characters that are not allowed: `` ` * _ ~ | ``\nPlease type your nickname again without these characters.')
+                                .setColor('#DD3601');
+                            await message.author.send({ embeds: [embed] });
+                            return;
+                        }
+
                         tempReg.nickname = message.content;
                         tempReg.stage = 'collectingFirstname';
                         try {

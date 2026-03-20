@@ -724,7 +724,8 @@ async function updateParticipantList(client, eventId) {
           if (user.EventUsers) {
             const computedPadding = DESIRED_NICKNAME_LENGTH - user.nickname.length;
             const padding = ' '.repeat(Math.max(0, computedPadding));
-            embedDescription += `\` ${number} \` ${flagEmoji} \` ${user.nickname} ${padding}\` (**${user.EventUsers.seat}**)\n`;
+            const safeNick = user.nickname.replace(/`/g, '');
+            embedDescription += `\` ${number} \` ${flagEmoji} \` ${safeNick} ${padding}\` (**${user.EventUsers.seat}**)\n`;
           } else {
             logger.warn(`EventUsers association missing for user: ${user.nickname}`);
           }
