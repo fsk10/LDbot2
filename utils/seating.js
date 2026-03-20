@@ -7,6 +7,7 @@ const logger = require('./logger');
 const config = require('../config/charts.config.json');
 
 const cache = new Map();
+const CACHE_MAX_SIZE = 20;
 
 function ensureDirSync(p) {
   if (!fsSync.existsSync(p)) fsSync.mkdirSync(p, { recursive: true });
@@ -124,6 +125,7 @@ async function renderMapForEvent(eventRow, occupied, pendingColor, occupiedColor
 
   if (!cache.has(cacheKey)) {
     const loaded = await loadChartById(chartId);
+    if (cache.size >= CACHE_MAX_SIZE) cache.delete(cache.keys().next().value);
     cache.set(cacheKey, loaded);
   }
   const { chart, root } = cache.get(cacheKey);

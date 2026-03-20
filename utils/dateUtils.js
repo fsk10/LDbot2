@@ -12,7 +12,7 @@ function parseLocalToUTC(input, zone = DEFAULT_TZ) {
   // Fallback to ISO (also interpreted in provided zone)
   if (!dt.isValid) dt = DateTime.fromISO(s, { zone });
   if (!dt.isValid) {
-    logger.error(`Invalid date input: ${input}`);
+    logger.warn(`Invalid date input: ${input}`);
     return null;
   }
   return dt.toUTC().toJSDate();

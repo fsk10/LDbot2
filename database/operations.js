@@ -21,7 +21,7 @@ async function addEvent(eventData) {
     await EventModel.create(eventData);
     return { success: true };
   } catch (error) {
-    logger.error("Error creating event in database:", error);
+    logger.error(`Error creating event "${eventData?.name}" in database:`, error);
     return { success: false, error: error.message };
   }
 }
@@ -138,7 +138,7 @@ async function addUser(userData, client) {
     if (error.name === 'SequelizeUniqueConstraintError') {
       throw new Error('A user with this email already exists.');
     } else {
-      logger.error("Error adding user to database:", error);
+      logger.error(`Error adding user "${userData?.discorduser}" to database:`, error);
       return { success: false, error: error.message || 'Validation error' };
     }
   }
@@ -307,7 +307,7 @@ async function deleteUserCompletely(nickname, client) {
 
     return { success: true };
   } catch (error) {
-    logger.error('Error deleting user:', error);
+    logger.error(`Error deleting user "${nickname}":`, error);
     return { success: false, error: error.message };
   }
 }
@@ -319,7 +319,7 @@ async function associateUserToEvent(userId, eventId) {
     await EventUsersModel.create({ userId, eventId });
     return { success: true };
   } catch (error) {
-    logger.error("Error associating user to event:", error);
+    logger.error(`Error associating userId ${userId} to eventId ${eventId}:`, error);
     return { success: false, error: error.message || 'Validation error' };
   }
 }
@@ -499,7 +499,7 @@ async function assignSeat(userId, eventId, preferredSeats) {
 
   const tempUserDetails = await TemporaryRegistration.findOne({ where: { discorduser: userId } });
   if (!tempUserDetails) {
-    logger.error("Error fetching temporary registration details for user");
+    logger.error(`Error fetching temporary registration details for user ${userId}`);
     return null;
   }
 
@@ -516,7 +516,7 @@ async function assignSeat(userId, eventId, preferredSeats) {
   });
 
   if (!user) {
-    logger.error("Error creating or fetching user");
+    logger.error(`Error creating or fetching user for discorduser ${userId}`);
     return null;
   }
 
