@@ -22,19 +22,6 @@ const { releaseUnconfirmedSeats } = require('./database/operations');
 const { tickAnnounceJobs } = require('./scheduler/announcementsCron');
 const { updateCountdownChannel } = require('./utils/countdown');
 
-// Run every 10 minutes
-cron.schedule('*/10 * * * *', releaseUnconfirmedSeats);
-
-// Schedule the countdown update to run every hour
-cron.schedule('0 * * * *', () => {
-    updateCountdownChannel(client).catch(err => logger.error(`Error updating countdown channel: ${err.message}`));
-});
-
-// Run the announcement scheduler every minute
-cron.schedule('* * * * *', () => {
-  try { tickAnnounceJobs(client); } catch (e) { logger.error('tickAnnounceJobs error:', e); }
-});
-
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -75,6 +62,19 @@ for (const file of eventFiles) {
 		client.on(event.name, (...args) => event.execute(...args));
 	}
 }
+
+// Run every 10 minutes
+cron.schedule('*/10 * * * *', releaseUnconfirmedSeats);
+
+// Schedule the countdown update to run every hour
+cron.schedule('0 * * * *', () => {
+    updateCountdownChannel(client).catch(err => logger.error(`Error updating countdown channel: ${err.message}`));
+});
+
+// Run the announcement scheduler every minute
+cron.schedule('* * * * *', () => {
+  try { tickAnnounceJobs(client); } catch (e) { logger.error('tickAnnounceJobs error:', e); }
+});
 
 (async () => {
   await initializeDatabase();

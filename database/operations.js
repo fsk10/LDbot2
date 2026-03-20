@@ -577,8 +577,10 @@ async function assignSeat(userId, eventId, preferredSeats) {
   return null;
 }
 
+const UNCONFIRMED_SEAT_EXPIRY_MS = 10 * 60 * 1000; // 10 minutes
+
 async function releaseUnconfirmedSeats() {
-  const expiryTime = 10 * 60 * 1000; // 10 minutes
+  const expiryTime = UNCONFIRMED_SEAT_EXPIRY_MS;
   const expiredTimestamp = new Date(Date.now() - expiryTime);
 
   await EventUsersModel.update(

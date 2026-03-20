@@ -245,6 +245,16 @@ module.exports = {
                             break;
                         }
 
+                        const invalidSeats = preferred.filter(s => !/^[a-zA-Z0-9\-]+$/.test(s) || s.length > 10);
+                        if (invalidSeats.length > 0) {
+                            const warn = new EmbedBuilder()
+                            .setTitle('Invalid seat format')
+                            .setDescription(`Invalid seat(s): \`${invalidSeats.join(', ')}\`\nSeats must be alphanumeric (e.g. \`3\`, \`A-01\`), max 10 characters.`)
+                            .setColor('#DD3601');
+                            await message.author.send({ embeds: [warn] });
+                            break;
+                        }
+
                         // Pick the first available seat
                         let picked = null;
                         for (const seat of preferred) {
