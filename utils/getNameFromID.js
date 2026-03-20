@@ -13,14 +13,16 @@ async function getNameFromID(interaction, id) {
         logger.error(`Failed to directly fetch user with ID: ${id}. Error: ${error.message}`);
     }
 
-    const role = interaction.guild.roles.cache.get(id);
-    if (role) {
-        return { type: 'role', name: `<@&${role.id}>` };
-    }
+    if (interaction.guild) {
+        const role = interaction.guild.roles.cache.get(id);
+        if (role) {
+            return { type: 'role', name: `<@&${role.id}>` };
+        }
 
-    const channel = interaction.guild.channels.cache.get(id);
-    if (channel) {
-        return { type: 'channel', name: `<#${channel.id}>` };
+        const channel = interaction.guild.channels.cache.get(id);
+        if (channel) {
+            return { type: 'channel', name: `<#${channel.id}>` };
+        }
     }
 
     logger.error(`Failed to fetch name for ID: ${id}. It's neither a valid role, channel, nor a user.`);

@@ -1,4 +1,5 @@
 const { SlashCommandBuilder } = require('@discordjs/builders');
+const { EmbedBuilder } = require('discord.js');
 const { getSetting } = require('../../database/operations');
 const settingsConfig = require('../../config/settingsConfig');
 const { getNameFromID } = require('../../utils/getNameFromID');

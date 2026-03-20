@@ -218,13 +218,12 @@ async function createZipFromImages(imagesDir, interaction, channelName) {
 }
 
 async function cleanupDirectory(directoryPath) {
-    fs.rm(directoryPath, { recursive: true, force: true }, (err) => {
-        if (err) {
-            logger.error(`Error cleaning up directory ${directoryPath}: ${err.message}`);
-        } else {
-            logger.info(`Successfully cleaned up directory ${directoryPath}`);
-        }
-    });
+    try {
+        await fs.promises.rm(directoryPath, { recursive: true, force: true });
+        logger.info(`Successfully cleaned up directory ${directoryPath}`);
+    } catch (err) {
+        logger.error(`Error cleaning up directory ${directoryPath}: ${err.message}`);
+    }
 }
 
 module.exports = {
