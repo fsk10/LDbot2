@@ -5,6 +5,7 @@ const { Op } = require('sequelize');
 const { EventModel, UserModel, EventUsersModel } = require('../../models');
 const { getAvailableSeatsForEvent } = require('../../database/operations');
 const formatDisplayDate = require('../../utils/dateUtils');
+const logger = require('../../utils/logger');
 
 const commandData = new SlashCommandBuilder()
   .setName('status')
@@ -90,7 +91,7 @@ async function execute(interaction) {
     });
 
   } catch (error) {
-    console.error(`Error executing /status: ${error.message}`);
+    logger.error(`Error executing /status: ${error.message}`);
     interaction.reply({ content: 'An error occurred while fetching status.', ephemeral: true });
   }
 }

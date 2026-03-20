@@ -274,7 +274,9 @@ module.exports = {
                                 });
                                 if (exists) tempReg.editingExisting = true;
                             }
-                        } catch (_) {}
+                        } catch (e) {
+                            logger.warn('Could not check if user is editing existing registration:', e.message);
+                        }
 
                         // Save chosen seat in the temp registration
                         tempReg.seat = picked;

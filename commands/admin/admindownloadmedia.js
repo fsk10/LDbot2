@@ -32,7 +32,7 @@ async function execute(interaction, client) {
     }
 
     const channel = interaction.options.getChannel('channel');
-    console.log(`Channel ID: ${channel.id}, Channel Type: ${channel.type}`);
+    logger.info(`Channel ID: ${channel.id}, Channel Type: ${channel.type}`);
 
     if (!channel || channel.type !== ChannelType.GuildText) {
         return interaction.reply({ content: 'Please provide a valid text channel.', ephemeral: true });

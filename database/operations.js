@@ -905,9 +905,14 @@ function scheduleParticipantListUpdate(client, eventId) {
   if (!updateScheduled) {
     updateScheduled = true;
 
-    setTimeout(() => {
-      updateParticipantList(client, eventId);
-      updateScheduled = false;
+    setTimeout(async () => {
+      try {
+        await updateParticipantList(client, eventId);
+      } catch (e) {
+        logger.error('Error in scheduleParticipantListUpdate:', e);
+      } finally {
+        updateScheduled = false;
+      }
     }, 5000); // Wait 5 seconds before updating
   }
 }
