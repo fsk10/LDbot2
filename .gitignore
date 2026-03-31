@@ -39,3 +39,6 @@ config/paymentConfig_Sweden.json
 
 # Generated seating charts
 charts/
+
+# Downloaded media
+downloads/

@@ -1,5 +1,6 @@
 const { SlashCommandBuilder } = require('@discordjs/builders');
 const { EmbedBuilder } = require('discord.js');
+const archiver = require('archiver');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
@@ -9,8 +10,10 @@ const logger = require('../../utils/logger');
 
 let backupIntervalID = null;
 const databasePath = path.join(__dirname, '../../database/db.sqlite');
+const chartsDirectory = path.join(__dirname, '../../charts');
 const backupConfigPath = path.join(__dirname, '../../config/backupConfig.js');
 const backupDirectory = path.join(__dirname, '../../backup');
+const checksumFile = path.join(backupDirectory, '.last_backup_checksum');
 const defaultBackupConfig = {
     isEnabled: false,
     intervalInDays: 7, // default to 7 days, for example
@@ -79,14 +82,13 @@ async function execute(interaction) {
             case 'status':
                 try {
                     const allFiles = fs.readdirSync(backupDirectory);
-                    const backupFiles = allFiles.filter(file => file.endsWith('.sqlite')).sort().reverse();
+                    const backupFiles = allFiles.filter(file => /^backup_\d{8}-\d{6}\.zip$/.test(file)).sort().reverse();
                     let lastBackupDate = 'None';
                     let totalBackups = 0;
 
                     if (backupFiles.length > 0) {
                         totalBackups = backupFiles.length;
-                        const matches = backupFiles[0].match(/^db_backup_(\d{4}\d{2}\d{2}-\d{2}\d{2}\d{2})/
-                        );
+                        const matches = backupFiles[0].match(/^backup_(\d{4}\d{2}\d{2}-\d{2}\d{2}\d{2})/);
                         if (matches && matches[1]) {
                             lastBackupDate = formatBackupFilenameToReadable(backupFiles[0]);
                         } else {
@@ -241,48 +243,62 @@ async function handleBackupProcess(force = false) {
         // Compute the checksum of the current database file
         const currentChecksum = await getChecksum(databasePath);
 
-        // Get the list of existing backup files and filter out only valid backup files
-        const backupFiles = fs.readdirSync(backupDirectory)
-            .filter(file => /^db_backup_\d{8}-\d{6}\.sqlite$/.test(file))
-            .sort()
-            .reverse();
-
-        // If there are existing backups, compute the checksum of the most recent backup
-        let lastBackupChecksum = "";
-        if (backupFiles.length > 0) {
-            lastBackupChecksum = await getChecksum(path.join(backupDirectory, backupFiles[0]));
+        // Compare with last stored checksum
+        let lastBackupChecksum = '';
+        if (fs.existsSync(checksumFile)) {
+            lastBackupChecksum = fs.readFileSync(checksumFile, 'utf8').trim();
         }
+
+        const backupFiles = fs.readdirSync(backupDirectory)
+            .filter(file => /^backup_\d{8}-\d{6}\.zip$/.test(file));
 
         // If the checksums are different, or there are no existing backups, create a new backup
         if (currentChecksum !== lastBackupChecksum || backupFiles.length === 0) {
             const backupFilename = generateBackupFilename();
             const backupPath = path.join(backupDirectory, backupFilename);
-
-            // Copies the current database to the backup directory with a new timestamped name
-            fs.copyFileSync(databasePath, backupPath);
+            await createZipBackup(backupPath);
+            fs.writeFileSync(checksumFile, currentChecksum);
         }
 
         // Retention logic
         ensureBackupRetention();
-        
+
     } catch (error) {
         logger.error("Error during backup process:", error);
     }
 }
 
 async function createForcedBackup() {
-    // Load backup configuration
-    const backupConfig = loadBackupConfig();
-
-    // Create new backup
     const backupFilename = generateBackupFilename();
     const backupPath = path.join(backupDirectory, backupFilename);
-    fs.copyFileSync(databasePath, backupPath);
+    await createZipBackup(backupPath);
+
+    const currentChecksum = await getChecksum(databasePath);
+    fs.writeFileSync(checksumFile, currentChecksum);
 
     // Retention logic
     ensureBackupRetention();
-    
+
     return backupFilename;
+}
+
+function createZipBackup(backupPath) {
+    return new Promise((resolve, reject) => {
+        const output = fs.createWriteStream(backupPath);
+        const archive = archiver('zip', { zlib: { level: 9 } });
+
+        output.on('close', resolve);
+        archive.on('error', reject);
+
+        archive.pipe(output);
+        archive.file(databasePath, { name: 'db.sqlite' });
+
+        if (fs.existsSync(chartsDirectory)) {
+            archive.directory(chartsDirectory, 'charts');
+        }
+
+        archive.finalize();
+    });
 }
 
 function formatDateToReadable(dateTime) {
@@ -292,22 +308,22 @@ function formatDateToReadable(dateTime) {
 
 function generateBackupFilename() {
     const now = DateTime.now().setZone('Europe/Stockholm').toFormat('yyyyMMdd-HHmmss');
-    return `db_backup_${now}.sqlite`;
+    return `backup_${now}.zip`;
 }
 
 function formatBackupFilenameToReadable(filename) {
-    const matches = filename.match(/^db_backup_(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/);
+    const matches = filename.match(/^backup_(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/);
     if (matches && matches.length === 7) {
         return `${matches[1]}-${matches[2]}-${matches[3]} ${matches[4]}:${matches[5]}:${matches[6]}`;
     }
-    return filename; // Return original filename if it doesn't match the expected format
+    return filename;
 }
 
 function ensureBackupRetention() {
     const backupConfig = loadBackupConfig();
 
     const backupFiles = fs.readdirSync(backupDirectory)
-        .filter(file => /^db_backup_\d{8}-\d{6}\.sqlite$/.test(file))
+        .filter(file => /^backup_\d{8}-\d{6}\.zip$/.test(file))
         .sort();
 
     while (backupFiles.length > backupConfig.versionsToKeep) {
