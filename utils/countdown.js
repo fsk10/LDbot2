@@ -43,7 +43,7 @@ async function updateCountdownChannel(client) {
     months: totalDuration.months,
     days: totalDuration.days,
     hours: totalDuration.hours % 24,
-    minutes: totalDuration.minutes % 60,
+    minutes: Math.floor(totalDuration.minutes % 60),
   };
 
   const channelName = formatTimeRemainingForChannel(timeRemaining);
