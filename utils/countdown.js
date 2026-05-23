@@ -34,6 +34,10 @@ async function updateCountdownChannel(client) {
   logger.info(`Closest upcoming event start: ${endDate ? endDate.toISO() : 'None'}`);
 
   if (!endDate || endDate <= startDate) {
+    const activeEnd = await getActiveEventEndTime();
+    if (activeEnd) {
+      return await setChannelName(client, countdownConfig.channel, 'Event in progress');
+    }
     return await setChannelName(client, countdownConfig.channel, 'No upcoming events');
   }
 

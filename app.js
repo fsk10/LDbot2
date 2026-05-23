@@ -18,7 +18,7 @@ require('./models');
 const { initializeDatabase } = require('./database/database');
 const deployCommands = require('./deploy-commands');
 const cron = require('node-cron');
-const { releaseUnconfirmedSeats } = require('./database/operations');
+const { releaseUnconfirmedSeats, autoCloseEndedEventRegistrations } = require('./database/operations');
 const { tickAnnounceJobs } = require('./scheduler/announcementsCron');
 const { updateCountdownChannel } = require('./utils/countdown');
 
@@ -65,6 +65,7 @@ for (const file of eventFiles) {
 
 // Run every 10 minutes
 cron.schedule('*/10 * * * *', releaseUnconfirmedSeats);
+cron.schedule('*/10 * * * *', autoCloseEndedEventRegistrations);
 
 // Schedule the countdown update to run every hour
 cron.schedule('0 * * * *', () => {

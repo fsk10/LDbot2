@@ -148,6 +148,8 @@ async function execute(interaction, client) {
     const event = await EventModel.findByPk(eventId);
     if (!event) return interaction.editReply('Event not found.');
 
+    const eventEnded = event.enddate && new Date(event.enddate) < new Date();
+
     // ----- LIST -----
     if (sub === 'list') {
       const outputType = interaction.options.getString('output') || 'short';
@@ -163,6 +165,10 @@ async function execute(interaction, client) {
       return;
     }
 
+    if (eventEnded) {
+      return interaction.editReply(`❌ **${event.name}** has ended. No further changes can be made via this command.`);
+    }
+
     if (sub === 'regopen') {
       const wantOpen = interaction.options.getBoolean('open', true);
 
@@ -175,9 +181,7 @@ async function execute(interaction, client) {
         { regopen: wantOpen } // helper renders boolean as Yes/No via formatValue()
       ));
 
-      const ended = event.enddate && new Date(event.enddate) < new Date();
-      const suffix = ended ? ' (note: the event has already ended)' : '';
-      return interaction.editReply(`✅ Registration for **${event.name}** is now **${wantOpen ? 'Open' : 'Closed'}**.${suffix}`);
+      return interaction.editReply(`✅ Registration for **${event.name}** is now **${wantOpen ? 'Open' : 'Closed'}**.`);
     }
 
     // For the other subcommands we now resolve nickname when needed

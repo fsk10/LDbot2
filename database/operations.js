@@ -579,6 +579,19 @@ async function assignSeat(userId, eventId, preferredSeats) {
 
 const UNCONFIRMED_SEAT_EXPIRY_MS = 10 * 60 * 1000; // 10 minutes
 
+async function autoCloseEndedEventRegistrations() {
+  try {
+    const now = new Date();
+    const [count] = await EventModel.update(
+      { regopen: false },
+      { where: { regopen: true, startdate: { [Op.lte]: now } } }
+    );
+    if (count > 0) logger.info(`Auto-closed registration for ${count} event(s) that have started.`);
+  } catch (error) {
+    logger.error('Error in autoCloseEndedEventRegistrations:', error);
+  }
+}
+
 async function releaseUnconfirmedSeats() {
   const expiryTime = UNCONFIRMED_SEAT_EXPIRY_MS;
   const expiredTimestamp = new Date(Date.now() - expiryTime);
@@ -942,6 +955,7 @@ module.exports = {
   updateUser,
   updateEventUser,
   assignSeat,
+  autoCloseEndedEventRegistrations,
   releaseUnconfirmedSeats,
   fetchOccupiedSeatsForEvent,
   getAvailableSeatsForEvent,
