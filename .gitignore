@@ -3,7 +3,7 @@ node_modules/
 
 # Database
 database/db.sqlite
-backup/*.sqlite
+backup/
 
 # Environment variables and configuration
 *.env
