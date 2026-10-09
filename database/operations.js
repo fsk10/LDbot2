@@ -764,14 +764,23 @@ async function updateParticipantList(client, eventId) {
       return;
     }
 
+    // Generate the seating map before purging; the map is optional so a missing
+    // or broken chart still lets the participant list through
+    let seatingMapBuffer = null;
+    try {
+      seatingMapBuffer = await generateCurrentSeatingMap(eventId);
+    } catch (err) {
+      logger.warn(`No seating map for eventId ${eventId} (chartId: ${event.chartId || 'none'}), posting list without map: ${err.message}`);
+    }
+
     // Purge everything to avoid lingering old embeds (like reserves)
     await purgeChannel(channel);
 
-    // Generate and send the seating map
-    const seatingMapBuffer = await generateCurrentSeatingMap(eventId);
-    await channel.send({
-      files: [{ attachment: seatingMapBuffer, name: 'seating-map.png' }]
-    });
+    if (seatingMapBuffer) {
+      await channel.send({
+        files: [{ attachment: seatingMapBuffer, name: 'seating-map.png' }]
+      });
+    }
 
     // Send the participants embed
     const embed = {
