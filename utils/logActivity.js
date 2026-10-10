@@ -14,7 +14,7 @@ async function sendToEventLog(client, eventId, message) {
 
         const channel = await client.channels.fetch(channelId);
         if (!channel || channel.type !== ChannelType.GuildText) {
-            logger.warn(`Event log channel ${channelId} for eventId ${eventId} is not a text channel, using global log channel.`);
+            logger.warn(`Event log channel ${channelId} for eventId ${eventId} is not a text channel. Falling back to the global log channel.`);
             return false;
         }
 
@@ -22,7 +22,7 @@ async function sendToEventLog(client, eventId, message) {
         return true;
     } catch (error) {
         const code = error?.code ?? error?.status ?? 'unknown';
-        logger.warn(`Could not log to event log channel (eventId: ${eventId}, channel: ${channelId}, code: ${code}), using global log channel: ${error?.message ?? error}`);
+        logger.warn(`Event log channel ${channelId} for eventId ${eventId} failed (${error?.message ?? error}, code: ${code}). Falling back to the global log channel.`);
         return false;
     }
 }
