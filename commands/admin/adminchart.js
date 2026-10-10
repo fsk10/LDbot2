@@ -206,7 +206,7 @@ module.exports = {
           eventId: event.id,
           chartId,
           imageName: outName
-        }));
+        }), { eventId: event.id });
 
         await scheduleParticipantListUpdate(interaction.client, event.id);
 
@@ -237,7 +237,7 @@ module.exports = {
           eventName: event.name,
           eventId: event.id,
           chartId
-        }));
+        }), { eventId: event.id });
 
         await scheduleParticipantListUpdate(interaction.client, event.id);
 

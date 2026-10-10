@@ -70,7 +70,7 @@ async function execute(interaction, client) {
       if (eventIdStr) {
         const result = await deleteUserFromEvent(nickname, eventIdStr, client);
         if (result.success) {
-          logActivity(client, `User **${nickname}** has been removed from **${result.eventName}** by [ **${interaction.user.tag}** ]`);
+          logActivity(client, `User **${nickname}** has been removed from **${result.eventName}** by [ **${interaction.user.tag}** ]`, { eventId: result.eventId });
           return interaction.editReply(`✅ User **${nickname}** has been removed from **${result.eventName}**.`);
         } else {
           return interaction.editReply(`❌ ${result.error || 'Failed to remove user from event.'}`);

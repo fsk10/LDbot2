@@ -54,6 +54,10 @@ module.exports = (sequelize) => {
       allowNull: false,
       defaultValue: false,
     },
+    logchannel: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
     // ... add other fields as needed
   }, 
   {

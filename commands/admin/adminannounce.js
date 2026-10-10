@@ -100,14 +100,15 @@ async function runAnnouncementNow(client, { eventId, channelId, openOnPost, acto
     // Match your house style (“Registration Status: Open”)
     logActivity(client,
       `Event **${event.name}** was **updated** by [ **${actorTag || 'Scheduler'}** ]\n` +
-      `:white_small_square: **Registration Status**: Open`
+      `:white_small_square: **Registration Status**: Open`,
+      { eventId: event.id }
     );
   }
 
   await postAnnouncementForJob(client, event, channelId);
 
   // Activity log for the announcement itself
-  logActivity(client, `Event **${event.name}** announced in <#${channelId}> by **${actorTag || 'Scheduler'}**`);
+  logActivity(client, `Event **${event.name}** announced in <#${channelId}> by **${actorTag || 'Scheduler'}**`, { eventId: event.id });
 }
 
 async function execute(interaction) {

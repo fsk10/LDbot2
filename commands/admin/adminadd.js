@@ -1,5 +1,5 @@
 const { SlashCommandBuilder } = require('@discordjs/builders');
-const { EmbedBuilder } = require('discord.js');
+const { EmbedBuilder, ChannelType } = require('discord.js');
 const { Op } = require('sequelize');
 const fs = require('fs');
 const path = require('path');
@@ -66,6 +66,13 @@ const addOptionToCommand = (opt, command) => {
           .setDescription(opt.description)
           .setRequired(opt.required));
       break;
+    case 'CHANNEL':
+      command.addChannelOption(option =>
+        option.setName(opt.name)
+          .setDescription(opt.description)
+          .setRequired(opt.required)
+          .addChannelTypes(ChannelType.GuildText));
+      break;
   }
 };
 
@@ -107,6 +114,13 @@ async function execute(interaction, client) {
   if (subcommand === 'event') {
     try {
       let eventData = {};
+
+      // Copy in configured fields from your adminAddConfig first; fields that need
+      // parsing (dates, channels, role, payment config) are overwritten below
+      for (let optionConfig of options[subcommand]) {
+        const optionName = optionConfig.name;
+        eventData[optionName] = extractOption(optionName, interaction, optionConfig.extractionMethod);
+      }
 
       const startDateStr = interaction.options.getString('startdate');
       const endDateStr   = interaction.options.getString('enddate');
@@ -165,11 +179,8 @@ async function execute(interaction, client) {
         eventData['participantchannel'] = null;
       }
 
-      // Copy in configured fields from your adminAddConfig
-      for (let optionConfig of options[subcommand]) {
-        const optionName = optionConfig.name;
-        eventData[optionName] = extractOption(optionName, interaction, optionConfig.extractionMethod);
-      }
+      // Event log channel (channel picker, restricted to text channels)
+      eventData.logchannel = interaction.options.getChannel('logchannel')?.id ?? null;
 
       // ---- Normalize & save adminrole (role picker only) ----
       {
@@ -297,9 +308,9 @@ async function execute(interaction, client) {
       const result = await addUser(userData, client);
       if (result.success) {
         if (isReserve) {
-          logActivity(client, `User **${displayName}** (${userData.nickname}) was added as a reserve to event **${event.name}** by [ **${interaction.user.tag}** ]`);
+          logActivity(client, `User **${displayName}** (${userData.nickname}) was added as a reserve to event **${event.name}** by [ **${interaction.user.tag}** ]`, { eventId: event.id });
         } else {
-          logActivity(client, `User **${displayName}** (${userData.nickname}) was added to event **${event.name}** by [ **${interaction.user.tag}** ]`);
+          logActivity(client, `User **${displayName}** (${userData.nickname}) was added to event **${event.name}** by [ **${interaction.user.tag}** ]`, { eventId: event.id });
         }
         await interaction.reply({ content: `✅ Saved.`, ephemeral: true });
 
@@ -415,7 +426,7 @@ async function execute(interaction, client) {
           paid: !!eventUser.haspaid,
           reserve: !!eventUser.reserve,
           paidAt: eventUser.paidAt || null
-        }));
+        }), { eventId: event.id });
 
         await scheduleParticipantListUpdate(client, eventId);
         return interaction.reply({ content: `✅ Saved.`, ephemeral: true });
@@ -464,7 +475,7 @@ async function execute(interaction, client) {
         nick: nickname,
         userId: user.id,
         changes: diffs
-      }));
+      }), { eventId: event.id });
 
       await scheduleParticipantListUpdate(client, eventId);
       return interaction.reply({ content: `✅ Saved.`, ephemeral: true });

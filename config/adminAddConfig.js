@@ -65,9 +65,15 @@ module.exports = {
             required: false,
             extractionMethod: 'getRole'
         },
-        { 
-            type: 'BOOLEAN', 
-            name: 'regopen', 
+        {
+            name: 'logchannel',
+            description: 'Channel for the event activity log',
+            type: 'CHANNEL',
+            required: false
+        },
+        {
+            type: 'BOOLEAN',
+            name: 'regopen',
             description: 'Allow public registration?', 
             required: false 
         }

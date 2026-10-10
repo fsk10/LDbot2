@@ -132,6 +132,7 @@ const EVENT_LABELS = {
   paymentconfig: 'Payment Config',
   adminrole: 'Event admin role',
   regopen: 'Registration Status',
+  logchannel: 'Log Channel',
 };
 
 function formatEventFieldValue(key, value) {
@@ -145,7 +146,7 @@ function formatEventFieldValue(key, value) {
     return `<@&${value}>`;
   }
 
-  if (key === 'participantchannel') {
+  if (key === 'participantchannel' || key === 'logchannel') {
     // store raw channel ID -> display as mention
     const id = String(value).match(/\d{5,}/)?.[0];
     return id ? `<#${id}>` : String(value);

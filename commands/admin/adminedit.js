@@ -1,5 +1,5 @@
 const { SlashCommandBuilder } = require('@discordjs/builders');
-const { EmbedBuilder } = require('discord.js');
+const { EmbedBuilder, ChannelType } = require('discord.js');
 const { Op } = require('sequelize');
 const fs = require('fs');
 const path = require('path');
@@ -27,6 +27,7 @@ const commandData = new SlashCommandBuilder()
       .addStringOption(option => option.setName('participantchannel').setDescription('Participant channel for the event'))
       .addStringOption(option => option.setName('paymentconfig').setDescription('Payment config file (paymentConfig_*.json from /config)').setAutocomplete(true))
       .addRoleOption(option => option.setName('adminrole').setDescription('Event admin role'))
+      .addChannelOption(option => option.setName('logchannel').setDescription('Channel for the event activity log').addChannelTypes(ChannelType.GuildText))
       .addBooleanOption(option => option.setName('regopen').setDescription('Allow public registration?'))
   )
   .addSubcommand(subcommand =>
@@ -78,7 +79,7 @@ async function execute(interaction, client) {
 
       // Build the patch (exclude adminrole here; we normalize it separately)
       let updatedFields = {};
-      for (let field of ['name', 'location', 'startdate', 'enddate', 'seatsavailable', 'entryfee', 'participantchannel', 'paymentconfig','regopen']) {
+      for (let field of ['name', 'location', 'startdate', 'enddate', 'seatsavailable', 'entryfee', 'participantchannel', 'paymentconfig','regopen', 'logchannel']) {
         const optionValue = interaction.options.get(field)?.value;
         if (optionValue !== undefined) updatedFields[field] = optionValue;
       }
@@ -141,7 +142,7 @@ async function execute(interaction, client) {
       if (result.success) {
         // Pretty labels & values: Payment Config → “Sweden”, Event Adminrole → @Role, etc.
         const logText = formatEventUpdateLog(interaction.user.tag, originalEvent.name, updatedFields);
-        logActivity(client, logText);
+        logActivity(client, logText, { eventId: originalEvent.id });
         return interaction.editReply('✅ Saved.');
       } else {
         logger.error(`Error updating event: ${result.message || result.error}`);
@@ -271,7 +272,7 @@ async function execute(interaction, client) {
             paid: !!row.haspaid,
             reserve: !!row.reserve,
             paidAt: row.paidAt || null
-          }));
+          }), { eventId: eventRecord.id });
 
           // Debounced refresh for new rows
           scheduleParticipantListUpdate(client, eventId);
@@ -311,7 +312,7 @@ async function execute(interaction, client) {
           nick: user.nickname,
           userId: user.id,
           changes: diffs
-        }));
+        }), { eventId: eventRecord.id });
 
         // No explicit participant-list update here — updateEventUser schedules it.
         return interaction.editReply('✅ Saved.');

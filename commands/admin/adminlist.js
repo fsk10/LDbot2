@@ -210,7 +210,8 @@ async function execute(interaction) {
           `End Date: ${formattedEndDate}\n` +
           `Seats: ${event.seatsavailable}\n` +
           `Entry Fee: €${event.entryfee}\n` +
-          `Participant Channel: ${event.participantchannel}`
+          `Participant Channel: ${event.participantchannel}\n` +
+          `Log Channel: ${event.logchannel ? `<#${event.logchannel}>` : 'Global log channel'}`
       });
     });
 

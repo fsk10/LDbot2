@@ -373,7 +373,7 @@ module.exports = {
 
           await interaction.update({ embeds: [buildRegistrationRemovedEmbed()], components: [] });
 
-          logActivity(interaction.client, `User **${user.nickname}** (${interaction.user.tag}) has unregistered from the event **${eventName}**.`);
+          logActivity(interaction.client, `User **${user.nickname}** (${interaction.user.tag}) has unregistered from the event **${eventName}**.`, { eventId: event.id });
         } catch (error) {
           await interaction.update({ content: 'An error occurred while processing your request.', ephemeral: true, components: [] });
         }
@@ -1055,7 +1055,7 @@ module.exports = {
                 paid:      after.haspaid,
                 reserve:   after.reserve,
                 paidAt:    after.paidAt,
-              }));
+              }), { eventId: temp.eventId });
             } else {
               if (isEditing) {
                 const diffs = [];
@@ -1073,7 +1073,7 @@ module.exports = {
                     paid:      after.haspaid,
                     reserve:   after.reserve,
                     paidAt:    after.paidAt,
-                  }));
+                  }), { eventId: temp.eventId });
                 } else {
                   logActivity(interaction.client, formatEventUserDiffLog(interaction.user.tag, {
                     eventName: eventName,
@@ -1081,7 +1081,7 @@ module.exports = {
                     nick:      user.nickname,
                     userId:    user.id,
                     changes:   diffs,
-                  }));
+                  }), { eventId: temp.eventId });
                 }
               } else {
                 // First-time non-reserve registration → “registered”
@@ -1095,7 +1095,7 @@ module.exports = {
                   paid:      after.haspaid,
                   reserve:   after.reserve,
                   paidAt:    after.paidAt,
-                }));
+                }), { eventId: temp.eventId });
               }
             }
 

@@ -108,7 +108,8 @@ async function tickAnnounceJobs(client) {
             await event.update({ regopen: true });
             logActivity(
               client,
-              `Event **${event.name}** was updated by [ **Scheduler** ]\n:white_small_square: **Registration Status**: Open`
+              `Event **${event.name}** was updated by [ **Scheduler** ]\n:white_small_square: **Registration Status**: Open`,
+              { eventId: event.id }
             );
           }
 

@@ -179,7 +179,7 @@ async function execute(interaction, client) {
         interaction.user.tag,
         event.name,
         { regopen: wantOpen } // helper renders boolean as Yes/No via formatValue()
-      ));
+      ), { eventId: event.id });
 
       return interaction.editReply(`✅ Registration for **${event.name}** is now **${wantOpen ? 'Open' : 'Closed'}**.`);
     }
@@ -229,7 +229,7 @@ async function execute(interaction, client) {
       if (before.reserve !== false) diffs.push({ label: 'Reserve', before: before.reserve, after: false });
       logActivity(client, formatEventUserDiffLog(interaction.user.tag, {
         eventName: event.name, eventId: event.id, nick: user.nickname, userId: user.id, changes: diffs
-      }));
+      }), { eventId: event.id });
 
       return interaction.editReply(`✅ Set **${nickname}** to seat **#${seat}** (participant).`);
     }
@@ -247,7 +247,7 @@ async function execute(interaction, client) {
       if (paid) diffs.push({ label: 'Paid date', before: before.paidAt, after: row.paidAt });
       logActivity(client, formatEventUserDiffLog(interaction.user.tag, {
         eventName: event.name, eventId: event.id, nick: user.nickname, userId: user.id, changes: diffs
-      }));
+      }), { eventId: event.id });
 
       return interaction.editReply(`✅ Marked **${nickname}** as **${paid ? 'PAID' : 'UNPAID'}**.`);
     }
@@ -266,7 +266,7 @@ async function execute(interaction, client) {
       if (reserve && (before.seat !== null)) diffs.push({ label: 'Seat', before: before.seat, after: null });
       logActivity(client, formatEventUserDiffLog(interaction.user.tag, {
         eventName: event.name, eventId: event.id, nick: user.nickname, userId: user.id, changes: diffs
-      }));
+      }), { eventId: event.id });
 
       return interaction.editReply(`✅ ${reserve ? 'Set' : 'Unset'} **reserve** for **${nickname}**.`);
     }
@@ -277,7 +277,7 @@ async function execute(interaction, client) {
       await row.destroy();
       await scheduleParticipantListUpdate(client, eventId);
 
-      logActivity(client, `User **${user.nickname}** was **removed** from **${event.name}** by [ **${interaction.user.tag}** ]`);
+      logActivity(client, `User **${user.nickname}** was **removed** from **${event.name}** by [ **${interaction.user.tag}** ]`, { eventId: event.id });
       return interaction.editReply(`✅ Unregistered **${nickname}** from **${event.name}**.`);
     }
 

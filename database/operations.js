@@ -283,7 +283,7 @@ async function deleteUserFromEvent(nickname, eventName, client) {
   }
 
   await updateParticipantList(client, event.id);
-  return { success: true, eventName: event.name };
+  return { success: true, eventName: event.name, eventId: event.id };
 }
 
 async function deleteUserCompletely(nickname, client) {
