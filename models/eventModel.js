@@ -58,6 +58,10 @@ module.exports = (sequelize) => {
       type: DataTypes.STRING,
       allowNull: true,
     },
+    announcechannel: {
+      type: DataTypes.STRING,
+      allowNull: true,
+    },
     // ... add other fields as needed
   }, 
   {

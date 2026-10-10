@@ -133,11 +133,14 @@ const EVENT_LABELS = {
   adminrole: 'Event admin role',
   regopen: 'Registration Status',
   logchannel: 'Log Channel',
+  announcechannel: 'Announce Channel',
 };
 
 function formatEventFieldValue(key, value) {
   if (value === null || value === undefined || value === '') {
     if (key === 'paymentconfig') return 'Default / Global';
+    if (key === 'logchannel') return 'Global log channel';
+    if (key === 'announcechannel') return 'Off';
     return '—';
   }
 
@@ -146,7 +149,7 @@ function formatEventFieldValue(key, value) {
     return `<@&${value}>`;
   }
 
-  if (key === 'participantchannel' || key === 'logchannel') {
+  if (key === 'participantchannel' || key === 'logchannel' || key === 'announcechannel') {
     // store raw channel ID -> display as mention
     const id = String(value).match(/\d{5,}/)?.[0];
     return id ? `<#${id}>` : String(value);

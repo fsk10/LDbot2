@@ -21,6 +21,7 @@ const Settings = require('../models/settingsModel')(sequelize);
 const ADDED_COLUMNS = {
   events: {
     logchannel: { type: DataTypes.STRING, allowNull: true },
+    announcechannel: { type: DataTypes.STRING, allowNull: true },
   },
 };
 

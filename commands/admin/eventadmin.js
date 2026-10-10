@@ -6,6 +6,7 @@ const { isEventAdminForEvent } = require('../../utils/permissions');
 const { UserModel, EventModel, EventUsersModel } = require('../../models');
 const { scheduleParticipantListUpdate } = require('../../database/operations');
 const logActivity = require('../../utils/logActivity');
+const announceRegistration = require('../../utils/announceRegistration');
 const logger = require('../../utils/logger');
 const { formatEventUserLog, formatEventUserDiffLog, formatEventUpdateLog } = require('../../utils/activityFormat');
 const { listUsers } = require('../../database/operations');
@@ -45,6 +46,15 @@ const data = new SlashCommandBuilder()
     .addStringOption(o => o.setName('event').setDescription('Event').setRequired(true).setAutocomplete(true))
     .addStringOption(o => o.setName('nickname').setDescription('User nickname').setRequired(true).setAutocomplete(true))
     .addBooleanOption(o => o.setName('reserve').setDescription('Reserve?').setRequired(true)))
+  // register
+  .addSubcommand(sc => sc
+    .setName('register')
+    .setDescription('Add an existing bot user to the event (works even when registration is closed)')
+    .addStringOption(o => o.setName('event').setDescription('Event').setRequired(true).setAutocomplete(true))
+    .addStringOption(o => o.setName('nickname').setDescription('User nickname').setRequired(true).setAutocomplete(true))
+    .addIntegerOption(o => o.setName('seat').setDescription('Seat number (makes them a participant)').setMinValue(1))
+    .addBooleanOption(o => o.setName('paid').setDescription('Has paid?'))
+    .addBooleanOption(o => o.setName('reserve').setDescription('Reserve? (default: reserve only if the event is full)')))
   // unregister
   .addSubcommand(sc => sc
     .setName('unregister')
@@ -191,30 +201,66 @@ async function execute(interaction, client) {
     const user = await UserModel.findOne({ where: { nickname: { [Op.like]: nickname } } });
     if (!user) return interaction.editReply(`No user found with nickname **${nickname}**.`);
 
-    // Existing row (or lazily create when needed)
     let row = await EventUsersModel.findOne({ where: { userId: user.id, eventId } });
 
-    async function ensureRow() {
-      if (!row) {
-        row = await EventUsersModel.create({
-          userId: user.id,
-          eventId,
-          seat: null,
-          haspaid: false,
-          paidAt: null,
-          reserve: true,
-          status: 'confirmed'
-        });
+    if (sub === 'register') {
+      if (row) return interaction.editReply(`User **${user.nickname}** is already registered in **${event.name}**.`);
+
+      const seat = interaction.options.getInteger('seat');
+      const paid = interaction.options.getBoolean('paid') ?? false;
+      const reserveOpt = interaction.options.getBoolean('reserve');
+
+      if (reserveOpt === true && seat !== null) {
+        return interaction.editReply('A reserve cannot have a seat. Leave out either **seat** or **reserve**.');
       }
+
+      let reserve = reserveOpt;
+      if (reserve === null) {
+        if (seat !== null) {
+          reserve = false;
+        } else {
+          const occupied = await EventUsersModel.count({ where: { eventId, reserve: false } });
+          reserve = occupied >= Number(event.seatsavailable || 0);
+        }
+      }
+
+      if (seat !== null) {
+        const taken = await EventUsersModel.findOne({ where: { eventId, seat } });
+        if (taken) return interaction.editReply(`Seat **${seat}** is already taken in **${event.name}**.`);
+      }
+
+      row = await EventUsersModel.create({
+        userId: user.id,
+        eventId,
+        seat: reserve ? null : seat,
+        haspaid: paid,
+        paidAt: paid ? new Date() : null,
+        reserve,
+        status: 'confirmed'
+      });
+      await scheduleParticipantListUpdate(client, eventId);
+
+      logActivity(client, formatEventUserLog(interaction.user.tag, {
+        action: 'added', eventName: event.name, eventId: event.id, nick: user.nickname, userId: user.id,
+        seat: row.seat, paid: !!row.haspaid, reserve: !!row.reserve, paidAt: row.paidAt || null
+      }), { eventId: event.id });
+      announceRegistration(client, event.id, user.nickname, 'registered');
+
+      const placement = row.reserve ? 'as **reserve**' : (row.seat ? `on seat **#${row.seat}**` : 'as **participant** (no seat yet)');
+      return interaction.editReply(`✅ Registered **${user.nickname}** in **${event.name}** ${placement}.`);
     }
 
-    const before = row ? {
+    // seat/paid/reserve/unregister only work on users already in the event
+    if (!row) {
+      return interaction.editReply(`User **${user.nickname}** is not registered in **${event.name}**. Use **/eventadmin register** first.`);
+    }
+
+    const before = {
       seat: row.seat, haspaid: !!row.haspaid, reserve: !!row.reserve, paidAt: row.paidAt || null
-    } : { seat: null, haspaid: false, reserve: false, paidAt: null };
+    };
 
     if (sub === 'seat') {
       const seat = interaction.options.getInteger('seat', true);
-      await ensureRow();
 
       const taken = await EventUsersModel.findOne({
         where: { eventId, seat, userId: { [Op.ne]: user.id } }
@@ -236,7 +282,6 @@ async function execute(interaction, client) {
 
     if (sub === 'paid') {
       const paid = interaction.options.getBoolean('paid', true);
-      await ensureRow();
 
       const patch = { haspaid: paid, paidAt: paid ? new Date() : null };
       await row.update(patch);
@@ -254,7 +299,6 @@ async function execute(interaction, client) {
 
     if (sub === 'reserve') {
       const reserve = interaction.options.getBoolean('reserve', true);
-      await ensureRow();
 
       const patch = { reserve };
       if (reserve) patch.seat = null; // reserve clears seat
@@ -272,12 +316,11 @@ async function execute(interaction, client) {
     }
 
     if (sub === 'unregister') {
-      if (!row) return interaction.editReply(`User **${nickname}** is not registered in **${event.name}**.`);
-
       await row.destroy();
       await scheduleParticipantListUpdate(client, eventId);
 
       logActivity(client, `User **${user.nickname}** was **removed** from **${event.name}** by [ **${interaction.user.tag}** ]`, { eventId: event.id });
+      announceRegistration(client, event.id, user.nickname, 'left');
       return interaction.editReply(`✅ Unregistered **${nickname}** from **${event.name}**.`);
     }
 

@@ -12,6 +12,7 @@ const logger = require('../utils/logger');
 const { formatEventUserLog, formatEventUserDiffLog } = require('../utils/activityFormat');
 const countries = require('../config/countryList');
 const logActivity = require('../utils/logActivity');
+const announceRegistration = require('../utils/announceRegistration');
 const formatDisplayDate = require('../utils/dateUtils');
 const { getRegistrationSnapshot } = require('../utils/registrationData');
 const { getNameFromID } = require('../utils/getNameFromID');
@@ -158,6 +159,8 @@ module.exports = {
           const focused = interaction.options.getFocused(true)?.name;
           if (focused === 'event') {
             await handleEventAutocompleteForEventAdmin(interaction);
+          } else if (focused === 'nickname' && sub === 'register') {
+            await handleNotInEventNicknameAutocomplete(interaction);
           } else if (focused === 'nickname') {
             await handleEventUserNicknameAutocomplete(interaction);
           }
@@ -374,6 +377,7 @@ module.exports = {
           await interaction.update({ embeds: [buildRegistrationRemovedEmbed()], components: [] });
 
           logActivity(interaction.client, `User **${user.nickname}** (${interaction.user.tag}) has unregistered from the event **${eventName}**.`, { eventId: event.id });
+          announceRegistration(interaction.client, event.id, user.nickname, 'left');
         } catch (error) {
           await interaction.update({ content: 'An error occurred while processing your request.', ephemeral: true, components: [] });
         }
@@ -922,6 +926,11 @@ module.exports = {
               where: { userId: user.id, eventId: temp.eventId },
             });
 
+            // Public announcement only for brand-new registrations, not edits
+            if (!existingEventUser && afterRow) {
+              announceRegistration(interaction.client, temp.eventId, user.nickname, 'registered');
+            }
+
             const after = afterRow ? {
               seat: afterRow.seat,
               haspaid: !!afterRow.haspaid,
@@ -1428,6 +1437,29 @@ async function handleEventUserNicknameAutocomplete(interaction) {
 
     const userSuggestions = eventRecord.users
       .filter(u => (u?.nickname || '').toLowerCase().includes(query))
+      .sort((a, b) => (a.nickname || '').localeCompare(b.nickname || '', 'en', { sensitivity: 'base' }))
+      .slice(0, 25)
+      .map(u => ({ name: u.nickname, value: u.nickname }));
+
+    await interaction.respond(userSuggestions);
+  } catch (error) {
+    await interaction.respond([]);
+  }
+}
+
+// All bot users NOT yet in the event; only for admins of that event (/eventadmin register)
+async function handleNotInEventNicknameAutocomplete(interaction) {
+  try {
+    const eventId = interaction.options.getString('event');
+    if (!eventId || !(await isEventAdminForEvent(interaction, eventId))) return await interaction.respond([]);
+
+    const query = (interaction.options.getFocused() || '').toString().toLowerCase();
+    const inEvent = await EventUsersModel.findAll({ where: { eventId }, attributes: ['userId'] });
+    const inEventIds = new Set(inEvent.map(r => r.userId));
+    const users = await UserModel.findAll({ attributes: ['id', 'nickname'] });
+
+    const userSuggestions = users
+      .filter(u => !inEventIds.has(u.id) && (u.nickname || '').toLowerCase().includes(query))
       .sort((a, b) => (a.nickname || '').localeCompare(b.nickname || '', 'en', { sensitivity: 'base' }))
       .slice(0, 25)
       .map(u => ({ name: u.nickname, value: u.nickname }));

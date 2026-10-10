@@ -211,7 +211,9 @@ async function execute(interaction) {
           `Seats: ${event.seatsavailable}\n` +
           `Entry Fee: €${event.entryfee}\n` +
           `Participant Channel: ${event.participantchannel}\n` +
-          `Log Channel: ${event.logchannel ? `<#${event.logchannel}>` : 'Global log channel'}`
+          `Log Channel: ${event.logchannel ? `<#${event.logchannel}>` : 'Global log channel'}
+` +
+          `Announce Channel: ${event.announcechannel ? `<#${event.announcechannel}>` : 'Off'}`
       });
     });
 

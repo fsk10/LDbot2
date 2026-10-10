@@ -21,6 +21,7 @@ const extractOption = require('../../utils/extractOption');
 const { isAdmin } = require('../../utils/permissions');
 const { getNameFromID } = require('../../utils/getNameFromID');
 const logActivity = require('../../utils/logActivity');
+const announceRegistration = require('../../utils/announceRegistration');
 const { formatEventUserLog, formatEventUserDiffLog, bulletEventField } = require('../../utils/activityFormat');
 const { listPaymentConfigFiles } = require('../../utils/payment');
 const { parseLocalToUTC } = require('../../utils/dateUtils');
@@ -181,6 +182,7 @@ async function execute(interaction, client) {
 
       // Event log channel (channel picker, restricted to text channels)
       eventData.logchannel = interaction.options.getChannel('logchannel')?.id ?? null;
+      eventData.announcechannel = interaction.options.getChannel('announcechannel')?.id ?? null;
 
       // ---- Normalize & save adminrole (role picker only) ----
       {
@@ -312,6 +314,7 @@ async function execute(interaction, client) {
         } else {
           logActivity(client, `User **${displayName}** (${userData.nickname}) was added to event **${event.name}** by [ **${interaction.user.tag}** ]`, { eventId: event.id });
         }
+        announceRegistration(client, event.id, userData.nickname, 'registered');
         await interaction.reply({ content: `✅ Saved.`, ephemeral: true });
 
         // debounce to avoid duplicate refreshes
@@ -427,6 +430,7 @@ async function execute(interaction, client) {
           reserve: !!eventUser.reserve,
           paidAt: eventUser.paidAt || null
         }), { eventId: event.id });
+        announceRegistration(client, event.id, user.nickname, 'registered');
 
         await scheduleParticipantListUpdate(client, eventId);
         return interaction.reply({ content: `✅ Saved.`, ephemeral: true });

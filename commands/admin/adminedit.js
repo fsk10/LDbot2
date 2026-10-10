@@ -6,6 +6,7 @@ const path = require('path');
 const { updateEvent, updateUser, updateEventUser, getAvailableSeatsForEvent, scheduleParticipantListUpdate } = require('../../database/operations');
 const { UserModel, EventModel, EventUsersModel } = require('../../models');
 const logActivity = require('../../utils/logActivity');
+const announceRegistration = require('../../utils/announceRegistration');
 const { isAdmin } = require('../../utils/permissions');
 const logger = require('../../utils/logger');
 const { formatEventUserLog, formatEventUserDiffLog, bullet, bulletEventField, formatEventUpdateLog } = require('../../utils/activityFormat');
@@ -28,6 +29,11 @@ const commandData = new SlashCommandBuilder()
       .addStringOption(option => option.setName('paymentconfig').setDescription('Payment config file (paymentConfig_*.json from /config)').setAutocomplete(true))
       .addRoleOption(option => option.setName('adminrole').setDescription('Event admin role'))
       .addChannelOption(option => option.setName('logchannel').setDescription('Channel for the event activity log').addChannelTypes(ChannelType.GuildText))
+      .addChannelOption(option => option.setName('announcechannel').setDescription('Channel for public register/unregister messages').addChannelTypes(ChannelType.GuildText))
+      .addStringOption(option => option.setName('clear').setDescription('Clear a channel setting').addChoices(
+        { name: 'Log channel (use global log channel)', value: 'logchannel' },
+        { name: 'Announce channel (turn off)', value: 'announcechannel' }
+      ))
       .addBooleanOption(option => option.setName('regopen').setDescription('Allow public registration?'))
   )
   .addSubcommand(subcommand =>
@@ -79,9 +85,18 @@ async function execute(interaction, client) {
 
       // Build the patch (exclude adminrole here; we normalize it separately)
       let updatedFields = {};
-      for (let field of ['name', 'location', 'startdate', 'enddate', 'seatsavailable', 'entryfee', 'participantchannel', 'paymentconfig','regopen', 'logchannel']) {
+      for (let field of ['name', 'location', 'startdate', 'enddate', 'seatsavailable', 'entryfee', 'participantchannel', 'paymentconfig','regopen', 'logchannel', 'announcechannel']) {
         const optionValue = interaction.options.get(field)?.value;
         if (optionValue !== undefined) updatedFields[field] = optionValue;
+      }
+
+      // Channel options can't be set to "none", so clearing is a separate option
+      const clearField = interaction.options.getString('clear');
+      if (clearField) {
+        if (updatedFields[clearField] !== undefined) {
+          return interaction.editReply(`Cannot both set and clear **${clearField}**.`);
+        }
+        updatedFields[clearField] = null;
       }
 
       const startDateStr = interaction.options.getString('startdate'); // optional
@@ -273,6 +288,7 @@ async function execute(interaction, client) {
             reserve: !!row.reserve,
             paidAt: row.paidAt || null
           }), { eventId: eventRecord.id });
+          announceRegistration(client, eventRecord.id, user.nickname, 'registered');
 
           // Debounced refresh for new rows
           scheduleParticipantListUpdate(client, eventId);

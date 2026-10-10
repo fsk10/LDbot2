@@ -305,7 +305,7 @@ async function deleteUserCompletely(nickname, client) {
 
     await UserModel.destroy({ where: { id: user.id } });
 
-    return { success: true };
+    return { success: true, eventIds: user.events.map(e => e.id) };
   } catch (error) {
     logger.error(`Error deleting user "${nickname}":`, error);
     return { success: false, error: error.message };

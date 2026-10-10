@@ -72,6 +72,12 @@ module.exports = {
             required: false
         },
         {
+            name: 'announcechannel',
+            description: 'Channel for public register/unregister messages (empty = off)',
+            type: 'CHANNEL',
+            required: false
+        },
+        {
             type: 'BOOLEAN',
             name: 'regopen',
             description: 'Allow public registration?', 

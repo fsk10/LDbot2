@@ -3,6 +3,7 @@ const { EmbedBuilder } = require('discord.js'); // <-- you were missing this
 const { isAdmin } = require('../../utils/permissions');
 const { deleteEvent, deleteUserFromEvent, listEvents, listUsers, deleteUserCompletely } = require('../../database/operations');
 const logActivity = require('../../utils/logActivity');
+const announceRegistration = require('../../utils/announceRegistration');
 
 const commandData = new SlashCommandBuilder()
   .setName('admindel')
@@ -71,6 +72,7 @@ async function execute(interaction, client) {
         const result = await deleteUserFromEvent(nickname, eventIdStr, client);
         if (result.success) {
           logActivity(client, `User **${nickname}** has been removed from **${result.eventName}** by [ **${interaction.user.tag}** ]`, { eventId: result.eventId });
+          announceRegistration(client, result.eventId, nickname, 'left');
           return interaction.editReply(`✅ User **${nickname}** has been removed from **${result.eventName}**.`);
         } else {
           return interaction.editReply(`❌ ${result.error || 'Failed to remove user from event.'}`);
@@ -79,6 +81,9 @@ async function execute(interaction, client) {
         const result = await deleteUserCompletely(nickname, client);
         if (result.success) {
           logActivity(client, `User **${nickname}** has been completely deleted by [ **${interaction.user.tag}** ]`);
+          for (const eventId of result.eventIds || []) {
+            announceRegistration(client, eventId, nickname, 'left');
+          }
           return interaction.editReply(`✅ User **${nickname}** has been completely deleted.`);
         } else {
           return interaction.editReply(`❌ ${result.error || 'Failed to delete user.'}`);
