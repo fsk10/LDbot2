@@ -7,8 +7,8 @@ const { EventModel } = require('../models');
 const logger = require('./logger');
 
 const STYLES = {
-    registered: { color: '#2ecc71', text: nick => `➕ **${nick}** registered for the event` },
-    left:       { color: '#e74c3c', text: nick => `➖ **${nick}** left the event` },
+    registered: { color: '#2ecc71', text: nick => `🆕 **${nick}** registered for the event` },
+    left:       { color: '#e74c3c', text: nick => `❌ **${nick}** left the event` },
 };
 
 async function announceRegistration(client, eventId, nickname, action) {
