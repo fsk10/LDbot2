@@ -21,6 +21,7 @@ const cron = require('node-cron');
 const { releaseUnconfirmedSeats, autoCloseEndedEventRegistrations } = require('./database/operations');
 const { tickAnnounceJobs } = require('./scheduler/announcementsCron');
 const { updateCountdownChannel } = require('./utils/countdown');
+const crashGuard = require('./utils/crashGuard');
 
 const client = new Client({
   intents: [
@@ -31,6 +32,8 @@ const client = new Client({
 	GatewayIntentBits.DirectMessages,
   ],
 })
+
+crashGuard.install(client);
 
 client.commands = new Collection();
 const foldersPath = path.join(__dirname, 'commands');
@@ -80,6 +83,8 @@ cron.schedule('* * * * *', () => {
 (async () => {
   await initializeDatabase();
   await deployCommands();
-  client.login(BOT_TOKEN);
-
-})();
+  await client.login(BOT_TOKEN);
+})().catch(err => {
+  // Startup failures must still exit so PM2 restarts us (rethrow as uncaught → crashGuard).
+  setImmediate(() => { throw err; });
+});

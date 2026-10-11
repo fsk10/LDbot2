@@ -1,6 +1,7 @@
 const { Events } = require('discord.js');
 const logger = require('../utils/logger');
 const { scheduleCountdownUpdate } = require('../utils/countdown');
+const { reportPreviousCrash } = require('../utils/crashGuard');
 
 module.exports = {
 	name: Events.ClientReady,
@@ -12,5 +13,6 @@ module.exports = {
 		} catch (error) {
 			logger.error(`Error scheduling countdown update: ${error.message}`);
 		}
+		await reportPreviousCrash(client);
 	},
 };

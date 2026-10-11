@@ -13,6 +13,7 @@ const { formatEventUserLog, formatEventUserDiffLog } = require('../utils/activit
 const countries = require('../config/countryList');
 const logActivity = require('../utils/logActivity');
 const announceRegistration = require('../utils/announceRegistration');
+const { withEventLock } = require('../utils/eventLock');
 const formatDisplayDate = require('../utils/dateUtils');
 const { getRegistrationSnapshot } = require('../utils/registrationData');
 const { getNameFromID } = require('../utils/getNameFromID');
@@ -186,18 +187,24 @@ module.exports = {
         const [, rawEventId] = customId.split('-');
         const eventId = parseInt(rawEventId, 10);
 
+        // Acknowledge at once: the DB/DM work below can pass Discord's 3 s limit under load.
+        const inGuild = interaction.inGuild();
+        if (inGuild) await interaction.deferReply({ ephemeral: true }).catch(() => {});
+        else await interaction.deferUpdate().catch(() => {});
+        const respond = payload => (inGuild ? interaction.editReply(payload).catch(() => {}) : Promise.resolve());
+
         try {
           const user = await UserModel.findOne({ where: { discorduser: userId } });
           if (!user) {
             const emb = buildRegistrationFailedEmbed('Could not find your user record. Please run **/register** again.');
-            await interaction.reply({ embeds: [emb], ephemeral: true });
+            await respond({ embeds: [emb] });
             return;
           }
 
           const event = await EventModel.findByPk(eventId);
           if (!event) {
             const emb = buildRegistrationFailedEmbed('That event no longer exists. Please start again.');
-            await interaction.reply({ embeds: [emb], ephemeral: true });
+            await respond({ embeds: [emb] });
             return;
           }
 
@@ -206,7 +213,7 @@ module.exports = {
             if (!bypass) {
               const msg = 'Registration is currently closed for this event.';
               if (interaction.inGuild?.()) {
-                await interaction.reply({ content: msg, ephemeral: true }).catch(()=>{});
+                await respond({ content: msg });
               } else {
                 try { await interaction.deferUpdate(); } catch {}
               }
@@ -232,7 +239,7 @@ module.exports = {
                 eventName: event.name,
                 participantMention,
             });
-            await interaction.reply({ embeds: [emb], ephemeral: true });
+            await respond({ embeds: [emb] });
 
             // --- DM with current registration details
             try {
@@ -292,9 +299,8 @@ module.exports = {
             } catch (dmErr) {
               logger.warn('Could not DM user reserve confirmation:', dmErr);
               if (interaction.inGuild()) {
-                await interaction.reply({
-                  content: 'I cannot DM you. Please enable DMs from server members or DM me first, then try again.',
-                  ephemeral: true
+                await respond({
+                  content: 'I cannot DM you. Please enable DMs from server members or DM me first, then try again.'
                 });
               } else {
                 try { await interaction.deferUpdate(); } catch { }
@@ -305,7 +311,7 @@ module.exports = {
             // Only notify in guild context
             if (interaction.channel?.type !== ChannelType.DM) {
               const notify = buildCheckDMsEmbed('Reserve Registration', event.name, '#FFA500');
-              await interaction.reply({ embeds: [notify], ephemeral: true });
+              await respond({ embeds: [notify] });
             }
 
           } else {
@@ -338,14 +344,14 @@ module.exports = {
 
             if (interaction.channel?.type !== ChannelType.DM) {
               const notify = buildCheckDMsEmbed('Seat Selection', event.name, '#28B81C');
-              await interaction.reply({ embeds: [notify], ephemeral: true });
+              await respond({ embeds: [notify] });
             }
           }
 
         } catch (err) {
           logger?.error?.('registration_confirm- handler error:', err);
           const emb = buildRegistrationFailedEmbed('Something went wrong while starting your registration. Please try again.');
-          await interaction.reply({ embeds: [emb], ephemeral: true });
+          await respond({ embeds: [emb] });
         }
         return; // IMPORTANT: stop further handling
       }
@@ -389,11 +395,17 @@ module.exports = {
         const [, rawEventId] = customId.split('-');
         const eventId = parseInt(rawEventId, 10);
 
+        // Acknowledge at once: the DB/DM work below can pass Discord's 3 s limit under load.
+        const inGuild = interaction.inGuild();
+        if (inGuild) await interaction.deferReply({ ephemeral: true }).catch(() => {});
+        else await interaction.deferUpdate().catch(() => {});
+        const respond = payload => (inGuild ? interaction.editReply(payload).catch(() => {}) : Promise.resolve());
+
         try {
             const event = await EventModel.findByPk(eventId);
             if (!event) {
                 const emb = buildRegistrationFailedEmbed('That event no longer exists.');
-                return interaction.reply({ embeds: [emb], ephemeral: true });
+                return respond({ embeds: [emb] });
             }
 
             if (!event.regopen) {
@@ -401,7 +413,7 @@ module.exports = {
               if (!bypass) {
                 const msg = 'Registration is currently closed for this event.';
                 if (interaction.inGuild?.()) {
-                  await interaction.reply({ content: msg, ephemeral: true }).catch(()=>{});
+                  await respond({ content: msg });
                 } else {
                   try { await interaction.deferUpdate(); } catch {}
                 }
@@ -440,7 +452,7 @@ module.exports = {
 
                 if (interaction.channel?.type !== ChannelType.DM) {
                     const notify = buildCheckDMsEmbed('Registration', event.name, '#28B81C');
-                    await interaction.reply({ embeds: [notify], ephemeral: true });
+                    await respond({ embeds: [notify] });
                 }
                 return;
             }
@@ -451,7 +463,7 @@ module.exports = {
                 // a) ephemeral notice in guild
                 if (interaction.channel?.type !== ChannelType.DM) {
                     const notice = buildAlreadyRegisteredNotice({ eventName: event.name });
-                    await interaction.reply({ embeds: [notice], ephemeral: true });
+                    await respond({ embeds: [notice] });
                 }
 
                 // b) set a lightweight temp context so the DM buttons know which event
@@ -509,14 +521,12 @@ module.exports = {
 
           if (interaction.channel?.type !== ChannelType.DM) {
             const notify = buildCheckDMsEmbed('Registration', event.name, '#28B81C');
-            await interaction.reply({ embeds: [notify], ephemeral: true });
+            await respond({ embeds: [notify] });
           }
         } catch (err) {
           logger?.error?.('register_event handler error:', err);
-          if (!interaction.replied && !interaction.deferred) {
-            const emb = buildRegistrationFailedEmbed('Sorry, could not start registration. Please try again.');
-            await interaction.reply({ embeds: [emb], ephemeral: true });
-          }
+          const emb = buildRegistrationFailedEmbed('Sorry, could not start registration. Please try again.');
+          await respond({ embeds: [emb] });
         }
         return;
       }
@@ -592,6 +602,13 @@ module.exports = {
                 temp.stage = 'collectingPreferredSeats';
                 await temp.save();
 
+                // ✅ Acknowledge the click first: rendering the map can take a while under load
+                if (interaction.channel?.type === ChannelType.DM) {
+                try { await interaction.update({ components: disableAllButtonsFromMessage(interaction.message) }); } catch { await interaction.deferUpdate().catch(() => { }); }
+                } else {
+                await interaction.deferUpdate().catch(() => { });
+                }
+
                 // DM map + prompt
                 try {
                 const seatingMapBuffer = await generateCurrentSeatingMap(temp.eventId);
@@ -604,13 +621,6 @@ module.exports = {
                 }
 
                 await interaction.user.send({ embeds: [buildSeatPromptEmbed()] });
-
-                // ✅ Acknowledge the click without sending extra messages
-                if (interaction.channel?.type === ChannelType.DM) {
-                try { await interaction.update({ components: disableAllButtonsFromMessage(interaction.message) }); } catch { await interaction.deferUpdate().catch(() => { }); }
-                } else {
-                await interaction.deferUpdate().catch(() => { });
-                }
             }
             } catch (err) {
                 logger?.error?.('account_confirm handler error:', err);
@@ -745,6 +755,9 @@ module.exports = {
           temp.stage = 'collectingPreferredSeats';
           await temp.save();
 
+          // Disable the choice buttons first: rendering the map can take a while under load
+          try { await interaction.update({ components: disableAllButtonsFromMessage(interaction.message) }); } catch {}
+
           // DM seating map + prompt
           try {
             const seatingMapBuffer = await generateCurrentSeatingMap(temp.eventId);
@@ -756,9 +769,6 @@ module.exports = {
             await interaction.user.send({ embeds: [buildSeatingMapErrorEmbed()] });
           }
           await interaction.user.send({ embeds: [buildSeatPromptEmbed()] });
-
-          // Disable the choice buttons where the user clicked
-          try { await interaction.update({ components: disableAllButtonsFromMessage(interaction.message) }); } catch {}
           return;
         }
 
@@ -896,16 +906,40 @@ module.exports = {
 
             // STEP D: re-read temp, compute flags
             temp = await TemporaryRegistration.findOne({ where: { discorduser: userId } });
-            const isReserve = !!temp.reserve;
+            let isReserve = !!temp.reserve;
+            const changesSeat = temp.editMode !== 'accountOnly';
+            let movedToReserve = false;
 
-            // STEP E: Upsert EventUsers row
-            if (user && eventDetails) {
+            // STEP E: Upsert EventUsers row. Seat and capacity were only checked
+            // when the seat was picked, so check again under a per-event lock:
+            // others may have confirmed the same seat or the last seat since.
+            const seatTaken = await withEventLock(temp.eventId, async () => {
               const existing = await EventUsersModel.findOne({
                 where: { userId: user.id, eventId: temp.eventId },
               });
+
+              if (changesSeat && !isReserve) {
+                if (!existing || existing.reserve) {
+                  const occupied = await EventUsersModel.count({ where: { eventId: temp.eventId, reserve: false } });
+                  if (occupied >= Number(eventDetails.seatsavailable || 0)) {
+                    isReserve = true;
+                    movedToReserve = true;
+                    temp.reserve = true;
+                    temp.seat = null;
+                    await temp.save();
+                  }
+                }
+                if (!isReserve && temp.seat != null) {
+                  const taken = await EventUsersModel.findOne({
+                    where: { eventId: temp.eventId, seat: temp.seat, userId: { [Sequelize.Op.ne]: user.id } },
+                  });
+                  if (taken) return true;
+                }
+              }
+
               if (existing) {
                 const updateFields = { status: 'confirmed' };
-                if (temp.editMode !== 'accountOnly') {
+                if (changesSeat) {
                   updateFields.seat = temp.seat;
                   updateFields.reserve = isReserve;
                 }
@@ -919,6 +953,45 @@ module.exports = {
                   reserve: isReserve,
                 });
               }
+              return false;
+            });
+
+            if (seatTaken) {
+              const lostSeat = temp.seat;
+              temp.seat = null;
+              temp.stage = 'collectingPreferredSeats';
+              await temp.save();
+
+              const takenEmbed = new EmbedBuilder()
+                .setTitle('Seat no longer available')
+                .setDescription(`Seat **#${lostSeat}** was taken by someone else while you were registering. Please pick new seats from the updated map below.`)
+                .setColor('#DD3601');
+              await interaction.user.send({ embeds: [takenEmbed] }).catch(() => {});
+              try {
+                const seatingMapBuffer = await generateCurrentSeatingMap(temp.eventId);
+                await interaction.user.send({
+                  files: [{ attachment: seatingMapBuffer, name: 'seating-map.png' }],
+                  content: "Here's the current seating map. Please review it before providing your preferred seats:",
+                });
+              } catch {
+                await interaction.user.send({ embeds: [buildSeatingMapErrorEmbed()] }).catch(() => {});
+              }
+              await interaction.user.send({ embeds: [buildSeatPromptEmbed()] }).catch(() => {});
+
+              if (inDM) {
+                try { await interaction.editReply({ components: [] }); } catch {}
+              } else {
+                try { await interaction.editReply({ embeds: [takenEmbed] }); } catch {}
+              }
+              return;
+            }
+
+            if (movedToReserve) {
+              const fullEmbed = new EmbedBuilder()
+                .setTitle('Event is now full')
+                .setDescription(`All seats for **${eventName}** were taken while you were registering, so you have been added to the reserve list.`)
+                .setColor('#FFA500');
+              await interaction.user.send({ embeds: [fullEmbed] }).catch(() => {});
             }
 
             // STEP F: DM/update UX
