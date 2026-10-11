@@ -9,6 +9,8 @@ const { loadChartById } = require('../utils/seating');
 const logger = require('../utils/logger');
 const { flagOrDash, buildAccountDetailsConfirmEmbed } = require('../utils/embeds');
 const { getRegistrationSnapshot } = require('../utils/registrationData');
+const { withEventLock } = require('../utils/eventLock');
+const { getHeldSeats, SEAT_HOLD_MINUTES } = require('../utils/seatHolds');
 
 module.exports = {
     name: 'messageCreate',
@@ -275,20 +277,31 @@ module.exports = {
                             logger.warn('Could not validate seats against chart:', e.message);
                         }
 
-                        // Pick the first available seat
+                        // Pick the first seat that is neither taken nor held by someone
+                        // else mid-registration, and save it (= hold it) under the
+                        // event lock so two users can't grab the same seat at once.
                         let picked = null;
-                        for (const seat of preferred) {
-                            const taken = await EventUsersModel.findOne({
-                            where: { eventId: tempReg.eventId, seat }
-                            });
-                            if (!taken) { picked = seat; break; }
-                        }
+                        await withEventLock(tempReg.eventId, async () => {
+                            const held = await getHeldSeats(tempReg.eventId, message.author.id);
+                            for (const seat of preferred) {
+                                if (held.has(String(seat))) continue;
+                                const taken = await EventUsersModel.findOne({
+                                where: { eventId: tempReg.eventId, seat }
+                                });
+                                if (!taken) { picked = seat; break; }
+                            }
+                            if (picked) {
+                                tempReg.seat = picked;
+                                tempReg.stage = 'showingConfirmation';
+                                await tempReg.save();
+                            }
+                        });
 
                         if (!picked) {
                             const allTaken = new EmbedBuilder()
                             .setTitle('Seats unavailable')
                             .setDescription(
-                                'All of your preferred seats are currently taken.\n' +
+                                'All of your preferred seats are taken or being held by someone who is registering right now.\n' +
                                 'Please send a new list, e.g. `7,8,15`.'
                             )
                             .setColor('#DD3601');
@@ -308,18 +321,13 @@ module.exports = {
                             logger.warn('Could not check if user is editing existing registration:', e.message);
                         }
 
-                        // Save chosen seat in the temp registration
-                        tempReg.seat = picked;
-                        tempReg.stage = 'showingConfirmation';
-                        await tempReg.save();
-
                         // Build a proper confirmation embed with buttons (use snapshot so fields aren’t blank)
                         const event = await EventModel.findByPk(tempReg.eventId);
                         const snap  = await getRegistrationSnapshot(message.author.id);
 
                         const confirm = new EmbedBuilder()
                         .setTitle('Registration Confirmation')
-                        .setDescription('Please review your registration details again and confirm.')
+                        .setDescription(`Please review your registration details again and confirm.\nYour seat is held for you for **${SEAT_HOLD_MINUTES} minutes**.`)
                         .setColor('#28B81C')
                         .addFields(
                             { name: '📍 Event', value: event?.name || String(tempReg.event || tempReg.eventId), inline: false },

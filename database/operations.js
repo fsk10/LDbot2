@@ -9,6 +9,7 @@ const fs = require('fs').promises;
 const path = require('path');
 const config = require('../config/charts.config.json');
 const { loadChartById, renderMapForEvent } = require('../utils/seating');
+const { getHeldSeats } = require('../utils/seatHolds');
 
 // Used in the function "scheduleParticipantListUpdate"
 let updateScheduled = false;
@@ -626,12 +627,22 @@ async function fetchOccupiedSeatsForEvent(eventID) {
   }
 }
 
-async function generateCurrentSeatingMap(eventID) {
+// includeHolds: also mark seats held by users mid-registration. Only for maps
+// sent during registration; the participant channel map isn't refreshed when
+// a hold expires, so it must not show them.
+async function generateCurrentSeatingMap(eventID, { includeHolds = false } = {}) {
   const [eventRow, occupied] = await Promise.all([
     EventModel.findByPk(eventID),
     fetchOccupiedSeatsForEvent(eventID)
   ]);
   if (!eventRow) throw new Error('Event not found');
+
+  if (includeHolds) {
+    const taken = new Set(occupied.map(o => o.seatId));
+    for (const seatId of await getHeldSeats(eventID)) {
+      if (!taken.has(seatId)) occupied.push({ seatId, nickname: 'HELD', hasPaid: false });
+    }
+  }
 
   const pngBuffer = await renderMapForEvent(
     eventRow,

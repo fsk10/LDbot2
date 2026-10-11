@@ -14,6 +14,7 @@ const countries = require('../config/countryList');
 const logActivity = require('../utils/logActivity');
 const announceRegistration = require('../utils/announceRegistration');
 const { withEventLock } = require('../utils/eventLock');
+const { getHeldSeats } = require('../utils/seatHolds');
 const formatDisplayDate = require('../utils/dateUtils');
 const { getRegistrationSnapshot } = require('../utils/registrationData');
 const { getNameFromID } = require('../utils/getNameFromID');
@@ -331,7 +332,7 @@ module.exports = {
 
             // DM seating map + seat prompt
             try {
-              const seatingMapBuffer = await generateCurrentSeatingMap(eventId);
+              const seatingMapBuffer = await generateCurrentSeatingMap(eventId, { includeHolds: true });
               await interaction.user.send({
                 files: [{ attachment: seatingMapBuffer, name: 'seating-map.png' }],
                 content: "Here's the current seating map. Please review it before providing your preferred seats:",
@@ -611,7 +612,7 @@ module.exports = {
 
                 // DM map + prompt
                 try {
-                const seatingMapBuffer = await generateCurrentSeatingMap(temp.eventId);
+                const seatingMapBuffer = await generateCurrentSeatingMap(temp.eventId, { includeHolds: true });
                 await interaction.user.send({
                     files: [{ attachment: seatingMapBuffer, name: 'seating-map.png' }],
                     content: "Here's the current seating map. Please review it before providing your preferred seats:",
@@ -760,7 +761,7 @@ module.exports = {
 
           // DM seating map + prompt
           try {
-            const seatingMapBuffer = await generateCurrentSeatingMap(temp.eventId);
+            const seatingMapBuffer = await generateCurrentSeatingMap(temp.eventId, { includeHolds: true });
             await interaction.user.send({
               files: [{ attachment: seatingMapBuffer, name: 'seating-map.png' }],
               content: "Here's the current seating map. Please review it before providing your preferred seats:",
@@ -934,6 +935,9 @@ module.exports = {
                     where: { eventId: temp.eventId, seat: temp.seat, userId: { [Sequelize.Op.ne]: user.id } },
                   });
                   if (taken) return true;
+                  // Our own hold may have expired and someone else picked the seat since
+                  const held = await getHeldSeats(temp.eventId, userId);
+                  if (held.has(String(temp.seat))) return true;
                 }
               }
 
@@ -968,7 +972,7 @@ module.exports = {
                 .setColor('#DD3601');
               await interaction.user.send({ embeds: [takenEmbed] }).catch(() => {});
               try {
-                const seatingMapBuffer = await generateCurrentSeatingMap(temp.eventId);
+                const seatingMapBuffer = await generateCurrentSeatingMap(temp.eventId, { includeHolds: true });
                 await interaction.user.send({
                   files: [{ attachment: seatingMapBuffer, name: 'seating-map.png' }],
                   content: "Here's the current seating map. Please review it before providing your preferred seats:",
@@ -1312,7 +1316,7 @@ module.exports = {
             await temp.save();
 
             try {
-              const seatingMapBuffer = await generateCurrentSeatingMap(temp.eventId);
+              const seatingMapBuffer = await generateCurrentSeatingMap(temp.eventId, { includeHolds: true });
               await interaction.user.send({
                 files: [{ attachment: seatingMapBuffer, name: 'seating-map.png' }],
                 content: "Here's the current seating map. Please review it before providing your preferred seats:",
