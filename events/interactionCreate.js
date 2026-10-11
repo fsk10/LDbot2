@@ -55,8 +55,11 @@ module.exports = {
         await command.execute(interaction, interaction.client);
       } catch (error) {
         logger.error(`Error executing command "${interaction.commandName}":`, error);
+        const content = 'Something went wrong while running this command. Please try again.';
         if (!interaction.replied && !interaction.deferred) {
-          await interaction.reply({ content: 'Ett fel uppstod när kommandot kördes.', ephemeral: true }).catch(() => {});
+          await interaction.reply({ content, ephemeral: true }).catch(() => {});
+        } else {
+          await interaction.editReply({ content, embeds: [], components: [] }).catch(() => {});
         }
       }
       return;

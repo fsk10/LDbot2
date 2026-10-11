@@ -10,6 +10,7 @@ const path = require('path');
 const config = require('../config/charts.config.json');
 const { loadChartById, renderMapForEvent } = require('../utils/seating');
 const { getHeldSeats } = require('../utils/seatHolds');
+const { withEventLock } = require('../utils/eventLock');
 
 // Used in the function "scheduleParticipantListUpdate"
 let updateScheduled = false;
@@ -702,7 +703,13 @@ async function createEventEmbed(eventId) {
   }
 }
 
-async function updateParticipantList(client, eventId) {
+// Serialized per event: two renders interleaving their purge + post would
+// delete each other's messages (Unknown Message) and leave duplicate lists.
+function updateParticipantList(client, eventId) {
+  return withEventLock(`participant-list-${eventId}`, () => renderParticipantList(client, eventId));
+}
+
+async function renderParticipantList(client, eventId) {
   try {
     const event = await EventModel.findByPk(eventId, {
     include: [{
@@ -942,12 +949,13 @@ function scheduleParticipantListUpdate(client, eventId) {
     updateScheduled = true;
 
     setTimeout(async () => {
+      // Clear before rendering, so a change made while the list is being
+      // rendered schedules a fresh update instead of being dropped.
+      updateScheduled = false;
       try {
         await updateParticipantList(client, eventId);
       } catch (e) {
         logger.error('Error in scheduleParticipantListUpdate:', e);
-      } finally {
-        updateScheduled = false;
       }
     }, 5000); // Wait 5 seconds before updating
   }

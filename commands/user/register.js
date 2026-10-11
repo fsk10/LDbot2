@@ -38,9 +38,8 @@ module.exports = {
 
         // Check if the event exists in the database
         if (!eventExists) {
-            await interaction.reply({
-                content: "Invalid event. Please select a valid event to register for.",
-                ephemeral: true
+            await interaction.editReply({
+                content: "Invalid event. Please select a valid event from the list."
             });
             return;
         }
