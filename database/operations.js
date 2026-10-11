@@ -640,7 +640,7 @@ async function generateCurrentSeatingMap(eventID, { includeHolds = false } = {})
   if (includeHolds) {
     const taken = new Set(occupied.map(o => o.seatId));
     for (const seatId of await getHeldSeats(eventID)) {
-      if (!taken.has(seatId)) occupied.push({ seatId, nickname: 'HELD', hasPaid: false });
+      if (!taken.has(seatId)) occupied.push({ seatId, nickname: 'PENDING', hasPaid: false });
     }
   }
 

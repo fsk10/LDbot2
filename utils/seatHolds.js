@@ -23,4 +23,9 @@ async function getHeldSeats(eventId, exceptDiscordUser = null) {
     return new Set(rows.map(r => String(r.seat)));
 }
 
-module.exports = { getHeldSeats, SEAT_HOLD_MINUTES };
+// Caption for seating maps sent during registration (they show PENDING seats).
+const REGISTRATION_MAP_CAPTION =
+    "Here's the current seating map. Please review it before providing your preferred seats:\n" +
+    `🟠 *Seats marked **PENDING** are being picked by someone registering right now. They become free again if not confirmed within ${SEAT_HOLD_MINUTES} minutes.*`;
+
+module.exports = { getHeldSeats, SEAT_HOLD_MINUTES, REGISTRATION_MAP_CAPTION };

@@ -14,7 +14,7 @@ const countries = require('../config/countryList');
 const logActivity = require('../utils/logActivity');
 const announceRegistration = require('../utils/announceRegistration');
 const { withEventLock } = require('../utils/eventLock');
-const { getHeldSeats } = require('../utils/seatHolds');
+const { getHeldSeats, REGISTRATION_MAP_CAPTION } = require('../utils/seatHolds');
 const formatDisplayDate = require('../utils/dateUtils');
 const { getRegistrationSnapshot } = require('../utils/registrationData');
 const { getNameFromID } = require('../utils/getNameFromID');
@@ -335,7 +335,7 @@ module.exports = {
               const seatingMapBuffer = await generateCurrentSeatingMap(eventId, { includeHolds: true });
               await interaction.user.send({
                 files: [{ attachment: seatingMapBuffer, name: 'seating-map.png' }],
-                content: "Here's the current seating map. Please review it before providing your preferred seats:",
+                content: REGISTRATION_MAP_CAPTION,
               });
             } catch (err) {
               await interaction.user.send({ embeds: [buildSeatingMapErrorEmbed()] });
@@ -615,7 +615,7 @@ module.exports = {
                 const seatingMapBuffer = await generateCurrentSeatingMap(temp.eventId, { includeHolds: true });
                 await interaction.user.send({
                     files: [{ attachment: seatingMapBuffer, name: 'seating-map.png' }],
-                    content: "Here's the current seating map. Please review it before providing your preferred seats:",
+                    content: REGISTRATION_MAP_CAPTION,
                 });
                 } catch (err) {
                 await interaction.user.send({ embeds: [buildSeatingMapErrorEmbed()] });
@@ -764,7 +764,7 @@ module.exports = {
             const seatingMapBuffer = await generateCurrentSeatingMap(temp.eventId, { includeHolds: true });
             await interaction.user.send({
               files: [{ attachment: seatingMapBuffer, name: 'seating-map.png' }],
-              content: "Here's the current seating map. Please review it before providing your preferred seats:",
+              content: REGISTRATION_MAP_CAPTION,
             });
           } catch {
             await interaction.user.send({ embeds: [buildSeatingMapErrorEmbed()] });
@@ -975,7 +975,7 @@ module.exports = {
                 const seatingMapBuffer = await generateCurrentSeatingMap(temp.eventId, { includeHolds: true });
                 await interaction.user.send({
                   files: [{ attachment: seatingMapBuffer, name: 'seating-map.png' }],
-                  content: "Here's the current seating map. Please review it before providing your preferred seats:",
+                  content: REGISTRATION_MAP_CAPTION,
                 });
               } catch {
                 await interaction.user.send({ embeds: [buildSeatingMapErrorEmbed()] }).catch(() => {});
@@ -1319,7 +1319,7 @@ module.exports = {
               const seatingMapBuffer = await generateCurrentSeatingMap(temp.eventId, { includeHolds: true });
               await interaction.user.send({
                 files: [{ attachment: seatingMapBuffer, name: 'seating-map.png' }],
-                content: "Here's the current seating map. Please review it before providing your preferred seats:",
+                content: REGISTRATION_MAP_CAPTION,
               });
             } catch (error) {
               await interaction.user.send({ embeds: [buildSeatingMapErrorEmbed()] });
