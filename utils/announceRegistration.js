@@ -7,8 +7,8 @@ const { EventModel } = require('../models');
 const logger = require('./logger');
 
 const STYLES = {
-    registered: { color: '#2ecc71', text: nick => `🆕 **${nick}** registered for the event` },
-    left:       { color: '#e74c3c', text: nick => `❌ **${nick}** left the event` },
+    registered: { color: '#2ecc71', text: (nick, event) => `🆕 **${nick}** registered for ${event}` },
+    left:       { color: '#e74c3c', text: (nick, event) => `❌ **${nick}** left ${event}` },
 };
 
 async function announceRegistration(client, eventId, nickname, action) {
@@ -17,7 +17,7 @@ async function announceRegistration(client, eventId, nickname, action) {
 
     let channelId = 'not set';
     try {
-        const event = await EventModel.findByPk(eventId, { attributes: ['id', 'enddate', 'announcechannel'] });
+        const event = await EventModel.findByPk(eventId, { attributes: ['id', 'name', 'enddate', 'announcechannel'] });
         if (!event?.announcechannel) return;
         if (event.enddate && new Date(event.enddate) < new Date()) return; // ended events stay quiet
         channelId = event.announcechannel;
@@ -28,9 +28,10 @@ async function announceRegistration(client, eventId, nickname, action) {
             return;
         }
 
+        const eventName = escapeMarkdown(String(event.name || 'the event'));
         const embed = new EmbedBuilder()
             .setColor(style.color)
-            .setDescription(style.text(escapeMarkdown(String(nickname))));
+            .setDescription(style.text(escapeMarkdown(String(nickname)), eventName));
 
         await channel.send({ embeds: [embed], allowedMentions: { parse: [] } });
     } catch (error) {
