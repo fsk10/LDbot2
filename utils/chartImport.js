@@ -1,7 +1,7 @@
 // utils/chartImport.js
 // Reads a Seat Chart Editor project zip (<name>.json + chart image, plus a
-// .csv and base/ floor plan that are ignored), validates it fully in memory
-// and only then writes charts/<chartId>/chart.json + the image.
+// .csv and base/ floor plan that are ignored) and validates it fully in memory;
+// saveChart then writes charts/<chartId>/chart.json + the image.
 const path = require('path');
 const fs = require('fs').promises;
 const yauzl = require('yauzl');
@@ -90,10 +90,10 @@ function validateSeats(chart) {
 }
 
 /**
- * Validate a project zip and save its chart. Writes nothing unless everything
- * checks out. Returns { chartId, imageName, seatCount, replaced }.
+ * Read and fully validate a project zip in memory; writes nothing.
+ * Returns { chartId, chart, imageName, imageBuf, seatCount } for saveChart.
  */
-async function importChartZip(buffer) {
+async function readChartZip(buffer) {
   let zip;
   try {
     zip = await openZip(buffer);
@@ -142,22 +142,29 @@ async function importChartZip(buffer) {
     const ext = imageExtension(imageBuf);
     if (!ext) throw new ChartImportError(`\`${wantedImage}\` is not a PNG or JPEG image.`);
 
-    // Everything is valid: write with our own file names, image first, chart.json last
-    const chartsDir = config.chartsDir || './charts';
-    const dir = path.join(chartsDir, chartId);
-    const replaced = await fs.access(path.join(dir, 'chart.json')).then(() => true, () => false);
-    ensureDirSync(dir);
-
     const imageName = `${chartId}${ext}`;
     chart.image = { ...chart.image, path: imageName };
-    await writeAtomic(path.join(dir, imageName), imageBuf);
-    await writeAtomic(path.join(dir, 'chart.json'), JSON.stringify(chart, null, 2));
-    invalidateChartCache(chartId);
-
-    return { chartId, imageName, seatCount: chart.seats.length, replaced };
+    return { chartId, chart, imageName, imageBuf, seatCount: chart.seats.length };
   } finally {
     zip.close();
   }
+}
+
+function chartDir(chartId) {
+  return path.join(config.chartsDir || './charts', chartId);
+}
+
+async function chartExists(chartId) {
+  return fs.access(path.join(chartDir(chartId), 'chart.json')).then(() => true, () => false);
+}
+
+// Write a chart from readChartZip: our own file names, image first, chart.json last.
+async function saveChart({ chartId, chart, imageName, imageBuf }) {
+  const dir = chartDir(chartId);
+  ensureDirSync(dir);
+  await writeAtomic(path.join(dir, imageName), imageBuf);
+  await writeAtomic(path.join(dir, 'chart.json'), JSON.stringify(chart, null, 2));
+  invalidateChartCache(chartId);
 }
 
 async function writeAtomic(file, data) {
@@ -166,4 +173,4 @@ async function writeAtomic(file, data) {
   await fs.rename(tmp, file);
 }
 
-module.exports = { importChartZip, ChartImportError };
+module.exports = { readChartZip, chartExists, saveChart, ChartImportError };

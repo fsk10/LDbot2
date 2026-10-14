@@ -1,4 +1,4 @@
-const { SlashCommandBuilder, AttachmentBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
+const { SlashCommandBuilder, AttachmentBuilder, EmbedBuilder, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const path = require('path');
 const fsSync = require('fs');
 const { isAdmin } = require('../../utils/permissions');
@@ -10,8 +10,46 @@ const { EventModel } = require('../../models');
 const operations = require('../../database/operations');
 const { scheduleParticipantListUpdate } = require('../../database/operations');
 const { formatChartImportLog, formatChartSetLog } = require('../../utils/activityFormat');
-const { importChartZip, ChartImportError } = require('../../utils/chartImport');
+const { readChartZip, chartExists, saveChart, ChartImportError } = require('../../utils/chartImport');
 const { Op } = require('sequelize');
+
+const REPLACE_TIMEOUT_MS = 60 * 1000;
+
+// Ask the admin before overwriting an existing chart. Resolves true on Replace;
+// on Cancel or timeout the reply says nothing was imported and it resolves false.
+async function confirmReplace(interaction, chartId, otherEventNames) {
+  const replaceId = `chartimport_replace:${interaction.id}`;
+  const cancelId = `chartimport_cancel:${interaction.id}`;
+  const usedBy = otherEventNames.length
+    ? ` and is also used by: ${otherEventNames.map(n => `**${n}**`).join(', ')}`
+    : '';
+
+  const message = await interaction.editReply({
+    content: `⚠️ Chart \`${chartId}\` already exists${usedBy}.\nReplacing it changes the seating map for every event that uses it. Replace it?`,
+    components: [new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(replaceId).setLabel('Replace').setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId(cancelId).setLabel('Cancel').setStyle(ButtonStyle.Secondary)
+    )]
+  });
+
+  let click;
+  try {
+    click = await message.awaitMessageComponent({
+      filter: i => i.user.id === interaction.user.id && (i.customId === replaceId || i.customId === cancelId),
+      time: REPLACE_TIMEOUT_MS
+    });
+  } catch {
+    await interaction.editReply({ content: `⏱️ No answer, chart \`${chartId}\` was not replaced. Nothing was imported.`, components: [] }).catch(() => {});
+    return false;
+  }
+
+  if (click.customId === cancelId) {
+    await click.update({ content: `Cancelled. Chart \`${chartId}\` was not replaced. Nothing was imported.`, components: [] }).catch(() => {});
+    return false;
+  }
+  await click.update({ content: `Replacing chart \`${chartId}\`…`, components: [] }).catch(() => {});
+  return true;
+}
 
 function chartsDir() {
   const dir = config.chartsDir || './charts';
@@ -132,15 +170,25 @@ module.exports = {
           return interaction.editReply(`❌ Please attach the project **.zip** from Seat Chart Editor (max ${Math.floor(maxZip / 1048576)} MB).`);
         }
 
-        // Validates everything before writing; nothing is saved on a ChartImportError
-        let result;
+        // Validates everything in memory; nothing is written yet
+        let prepared;
         try {
-          result = await importChartZip(await downloadBuffer(zipAtt.url, maxZip));
+          prepared = await readChartZip(await downloadBuffer(zipAtt.url, maxZip));
         } catch (e) {
           if (e instanceof ChartImportError) return interaction.editReply(`❌ ${e.message} Nothing was imported.`);
           throw e;
         }
-        const { chartId, imageName, seatCount, replaced } = result;
+        const { chartId, imageName, seatCount } = prepared;
+
+        // Replacing an existing chart changes it for every event that uses it, so ask first
+        const replaced = await chartExists(chartId);
+        if (replaced) {
+          const others = await EventModel.findAll({ where: { chartId, id: { [Op.ne]: event.id } }, attributes: ['name'] });
+          const ok = await confirmReplace(interaction, chartId, others.map(o => o.name));
+          if (!ok) return;
+        }
+
+        await saveChart(prepared);
 
         // link event -> chartId
         event.chartId = chartId;
@@ -157,12 +205,7 @@ module.exports = {
 
         await scheduleParticipantListUpdate(interaction.client, event.id);
 
-        let reply = `✅ Imported chart \`${chartId}\` (${seatCount} seats) and linked it to **${event.name}**.`;
-        if (replaced) {
-          const others = await EventModel.findAll({ where: { chartId, id: { [Op.ne]: event.id } }, attributes: ['name'] });
-          reply += `\n⚠️ This replaced the existing chart \`${chartId}\`` +
-            (others.length ? `, which is also used by: ${others.map(o => `**${o.name}**`).join(', ')}.` : '.');
-        }
+        let reply = `✅ ${replaced ? 'Replaced' : 'Imported'} chart \`${chartId}\` (${seatCount} seats) and linked it to **${event.name}**.`;
         if (seatCount !== Number(event.seatsavailable || 0)) {
           reply += `\nℹ️ The chart has ${seatCount} seats but the event has seatsavailable = ${event.seatsavailable ?? 'not set'}. Update it with **/adminedit event** if needed.`;
         }
