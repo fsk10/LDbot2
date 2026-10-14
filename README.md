@@ -86,7 +86,7 @@ LDbot2 is a Discord bot for managing and organizing LAN events — handling regi
 | `/adminlist events` | List all events |
 | `/adminlist users` | List users, optionally filtered by event |
 | `/adminannounce` | Post or schedule an event announcement |
-| `/adminchart` | Manage seating charts |
+| `/adminchart` | Manage seating charts: `import` a Seat Chart Editor project zip, `set`, `preview`, `list` |
 | `/admincountdown` | Configure the countdown channel |
 | `/adminbackup` | Configure and trigger database backups |
 | `/admindownloadimages` | Bulk download images from a channel |

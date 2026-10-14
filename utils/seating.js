@@ -303,6 +303,7 @@ function invalidateChartCache(chartId) {
 
 module.exports = {
   loadChartById,
+  validateChart,
   renderMapForEvent,
   ensureDirSync,
   resolveJimpFont,

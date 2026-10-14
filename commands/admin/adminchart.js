@@ -1,16 +1,17 @@
 const { SlashCommandBuilder, AttachmentBuilder, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
 const path = require('path');
-const fs = require('fs').promises;
 const fsSync = require('fs');
 const { isAdmin } = require('../../utils/permissions');
 const config = require('../../config/charts.config.json');
 const logger = require('../../utils/logger');
 const logActivity = require('../../utils/logActivity');
-const { ensureDirSync, loadChartById, invalidateChartCache } = require('../../utils/seating');
+const { ensureDirSync, loadChartById } = require('../../utils/seating');
 const { EventModel } = require('../../models');
 const operations = require('../../database/operations');
 const { scheduleParticipantListUpdate } = require('../../database/operations');
 const { formatChartImportLog, formatChartSetLog } = require('../../utils/activityFormat');
+const { importChartZip, ChartImportError } = require('../../utils/chartImport');
+const { Op } = require('sequelize');
 
 function chartsDir() {
   const dir = config.chartsDir || './charts';
@@ -27,32 +28,12 @@ async function resolveEventByInput(input) {
   return EventModel.findOne({ where: { name: v } });
 }
 
-async function downloadToFile(url, destPath, maxBytes, allowedMime) {
-  const res = await fetch(url, { method: 'GET' });
-  if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
-
-  const type = res.headers.get('content-type') || '';
-  if (allowedMime && allowedMime.length && !allowedMime.some(m => type.includes(m))) {
-    throw new Error(`Unsupported content-type "${type}"`);
-  }
-
-  const buf = Buffer.from(await res.arrayBuffer());
-  if (maxBytes && buf.length > maxBytes) {
-    throw new Error(`File too large (${buf.length} bytes)`);
-  }
-
-  await fs.writeFile(destPath, buf);
-  return destPath;
-}
-
-async function fetchText(url, maxBytes) {
+async function downloadBuffer(url, maxBytes) {
   const res = await fetch(url, { method: 'GET' });
   if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
   const buf = Buffer.from(await res.arrayBuffer());
-  if (maxBytes && buf.length > maxBytes) {
-    throw new Error(`File too large (${buf.length} bytes)`);
-  }
-  return buf.toString('utf8');
+  if (buf.length > maxBytes) throw new ChartImportError('The zip file is too large.');
+  return buf;
 }
 
 function listChartIdsLocal(query) {
@@ -87,19 +68,15 @@ module.exports = {
 
     .addSubcommand(sub =>
       sub.setName('import')
-        .setDescription('Import a seating chart (JSON v2 + base image) and attach to an event.')
+        .setDescription('Import a Seat Chart Editor project zip and attach it to an event.')
         .addStringOption(o => o
           .setName('event')
           .setDescription('Event name or id')
           .setRequired(true)
           .setAutocomplete(true))
         .addAttachmentOption(o => o
-          .setName('json')
-          .setDescription('The chart.json file (v2, must include "chartId")')
-          .setRequired(true))
-        .addAttachmentOption(o => o
-          .setName('image')
-          .setDescription('Base image (png/jpg/webp)')
+          .setName('zip')
+          .setDescription('Project zip from Seat Chart Editor (chart .json + chart image)')
           .setRequired(true))
     )
 
@@ -143,57 +120,27 @@ module.exports = {
 
       if (sub === 'import') {
         const eventInput = interaction.options.getString('event', true);
-        const jsonAtt = interaction.options.getAttachment('json', true);
-        const imgAtt  = interaction.options.getAttachment('image', true);
+        const zipAtt = interaction.options.getAttachment('zip', true);
 
         await interaction.deferReply({ ephemeral: true });
 
         const event = await resolveEventByInput(eventInput);
         if (!event) return interaction.editReply(`❌ Event "${eventInput}" not found.`);
 
-        const jsonText = await fetchText(jsonAtt.url, config.uploads?.maxJsonBytes || 1048576);
-        let parsed;
+        const maxZip = config.uploads?.maxZipBytes || 26214400;
+        if (!/\.zip$/i.test(zipAtt.name || '') || zipAtt.size > maxZip) {
+          return interaction.editReply(`❌ Please attach the project **.zip** from Seat Chart Editor (max ${Math.floor(maxZip / 1048576)} MB).`);
+        }
+
+        // Validates everything before writing; nothing is saved on a ChartImportError
+        let result;
         try {
-          parsed = JSON.parse(jsonText);
+          result = await importChartZip(await downloadBuffer(zipAtt.url, maxZip));
         } catch (e) {
-          return interaction.editReply(`❌ Uploaded JSON is not valid: ${e.message}`);
+          if (e instanceof ChartImportError) return interaction.editReply(`❌ ${e.message} Nothing was imported.`);
+          throw e;
         }
-
-        if (parsed.version !== 2) {
-          return interaction.editReply(`❌ chart.version must be 2. Received: ${parsed.version ?? '(missing)'}`);
-        }
-        if (!Array.isArray(parsed.seats)) {
-          return interaction.editReply(`❌ chart.seats must be an array.`);
-        }
-        const chartIdRaw = parsed.chartId || parsed.id || '';
-        const chartId = String(chartIdRaw).toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
-        if (!chartId) {
-          return interaction.editReply(`❌ chartId missing in JSON. Please include "chartId" in your export.`);
-        }
-
-        const dir = path.join(chartsDir(), chartId);
-        ensureDirSync(dir);
-
-        const jsonPath = path.join(dir, 'chart.json');
-        await fs.writeFile(jsonPath, JSON.stringify(parsed, null, 2), 'utf8');
-
-        const ext = path.extname(imgAtt.name || '').toLowerCase() || '.png';
-        const outName = parsed.image?.path ? path.basename(parsed.image.path) : `SeatingMap${ext}`;
-        const imgPath = path.join(dir, outName);
-
-        await downloadToFile(
-          imgAtt.url,
-          imgPath,
-          config.uploads?.maxImageBytes || 5242880,
-          (config.uploads?.allowedImageMime || ['image/png', 'image/jpeg', 'image/webp'])
-        );
-
-        parsed.image = parsed.image || {};
-        parsed.image.path = outName;
-        await fs.writeFile(jsonPath, JSON.stringify(parsed, null, 2), 'utf8');
-
-        // ensure fresh render uses new files
-        invalidateChartCache(chartId);
+        const { chartId, imageName, seatCount, replaced } = result;
 
         // link event -> chartId
         event.chartId = chartId;
@@ -205,12 +152,21 @@ module.exports = {
           eventName: event.name,
           eventId: event.id,
           chartId,
-          imageName: outName
+          imageName
         }), { eventId: event.id });
 
         await scheduleParticipantListUpdate(interaction.client, event.id);
 
-        return interaction.editReply('✅ Imported and linked.');
+        let reply = `✅ Imported chart \`${chartId}\` (${seatCount} seats) and linked it to **${event.name}**.`;
+        if (replaced) {
+          const others = await EventModel.findAll({ where: { chartId, id: { [Op.ne]: event.id } }, attributes: ['name'] });
+          reply += `\n⚠️ This replaced the existing chart \`${chartId}\`` +
+            (others.length ? `, which is also used by: ${others.map(o => `**${o.name}**`).join(', ')}.` : '.');
+        }
+        if (seatCount !== Number(event.seatsavailable || 0)) {
+          reply += `\nℹ️ The chart has ${seatCount} seats but the event has seatsavailable = ${event.seatsavailable ?? 'not set'}. Update it with **/adminedit event** if needed.`;
+        }
+        return interaction.editReply(reply);
       }
 
       if (sub === 'set') {
@@ -225,7 +181,8 @@ module.exports = {
         try {
           await loadChartById(chartId);
         } catch (e) {
-          return interaction.editReply(`❌ Cannot load chart "${chartId}": ${e.message}`);
+          logger.warn(`adminchart set: cannot load chart "${chartId}": ${e.message}`);
+          return interaction.editReply(`❌ Cannot load chart "${chartId}". Check the id with **/adminchart list**.`);
         }
 
         event.chartId = chartId;
@@ -279,12 +236,12 @@ module.exports = {
 
       return interaction.reply({ content: 'Unknown subcommand.', ephemeral: true });
     } catch (err) {
-      logger?.error?.(err);
-      const msg = (err && err.message) ? err.message : String(err);
+      logger.error(`adminchart error: ${err?.stack || err}`);
+      const content = '❌ Something went wrong. Details are in the bot log.';
       if (interaction.deferred || interaction.replied) {
-        return interaction.editReply(`❌ Error: ${msg}`);
+        return interaction.editReply(content).catch(() => {});
       } else {
-        return interaction.reply({ content: `❌ Error: ${msg}`, ephemeral: true });
+        return interaction.reply({ content, ephemeral: true }).catch(() => {});
       }
     }
   }

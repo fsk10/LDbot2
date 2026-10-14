@@ -17,6 +17,7 @@
     "debug": false
   },
   "uploads": {
+    "maxZipBytes": 26214400,
     "maxJsonBytes": 1048576,
     "maxImageBytes": 5242880,
     "allowedImageMime": ["image/png", "image/jpeg", "image/jpg", "image/webp"]
