@@ -185,17 +185,8 @@ async function renderMapForEvent(eventRow, occupied, pendingColor, occupiedColor
     const rw = textImg.bitmap.width;
     const rh = textImg.bitmap.height;
 
-    // mall horizontal nudge to visually center names for top/bottom anchors
-    const seatW = (seat.shape === 'rect')
-      ? (seat.w ?? 0)
-      : ((seat.r ?? 0) * 2);
-
-    const edgeXNudgePx = Number.isFinite(config?.seating?.anchorXNudgePx)
-      ? config.seating.anchorXNudgePx
-      : Math.round(seatW * (Number(config?.seating?.anchorXNudgePct) || 0.18));
-
     if (debug) {
-      logger.info(`[seating] seat=${seat.id} anchor=${nameAnchor} nudgePx=${edgeXNudgePx} seatW=${seatW}`);
+      logger.info(`[seating] seat=${seat.id} anchor=${nameAnchor} rotation=${angle}`);
     }
 
     // Seat bbox + offsets (with intuitive semantics)
@@ -217,12 +208,12 @@ async function renderMapForEvent(eventRow, occupied, pendingColor, occupiedColor
         if (debug) drawCross(image, Math.round(targetX), Math.round(targetY), 5, 0x0000ffff); // blue
         break;
       case 'top':
-        targetX = seat.x + offX - edgeXNudgePx;
+        targetX = seat.x + offX;
         targetY = bbox.top - Math.abs(offY);
         if (debug) drawCross(image, Math.round(targetX), Math.round(targetY), 5, 0x88ffffff);
         break;
       case 'bottom':
-        targetX = seat.x + offX + edgeXNudgePx;
+        targetX = seat.x + offX;
         targetY = bbox.bottom + Math.abs(offY);
         if (debug) drawCross(image, Math.round(targetX), Math.round(targetY), 5, 0x8844ffff);
         break;
@@ -242,17 +233,31 @@ async function renderMapForEvent(eventRow, occupied, pendingColor, occupiedColor
     // Edge/corner pinning:
     // - left   => pin RIGHT edge (closest to seat)
     // - right  => pin LEFT  edge
-    // - top    => pin LEFT  edge  (same edge as "right")
-    // - bottom => pin RIGHT edge  (same edge as "left")
+    // - top    => pin the bottommost corner of the rotated text (nearest the seat)
+    // - bottom => pin the topmost corner of the rotated text (nearest the seat)
     let pinX, pinY;
     const nudgePx = Number.isFinite(config.seating?.anchorNudgePx)
       ? config.seating.anchorNudgePx
       : Math.round(textHeight * (config.seating?.anchorNudgePct ?? 0.2));
 
-    const pinAsRightEdge = (nameAnchor === 'left' || nameAnchor === 'bottom'); // right edge pinned
-    const pinAsLeftEdge  = (nameAnchor === 'right' || nameAnchor === 'top');   // left edge pinned
+    const pinAsRightEdge = (nameAnchor === 'left');  // right edge pinned
+    const pinAsLeftEdge  = (nameAnchor === 'right'); // left edge pinned
 
-    if (pinAsRightEdge) {
+    if (nameAnchor === 'top' || nameAnchor === 'bottom') {
+      // Pin the point of the (rotated) text nearest the seat: its topmost corner
+      // when below, its bottommost corner when above (two corners tie → their midpoint).
+      const phi = -angle * Math.PI / 180; // visual rotation, clockwise (Jimp rotates CCW)
+      const c = Math.cos(phi), s = Math.sin(phi);
+      const corners = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([sx, sy]) => {
+        const x = sx * textWidth / 2, y = sy * textHeight / 2;
+        return { x: x * c - y * s, y: x * s + y * c };
+      });
+      const ys = corners.map(p => p.y);
+      const edgeY = nameAnchor === 'bottom' ? Math.min(...ys) : Math.max(...ys);
+      const near = corners.filter(p => Math.abs(p.y - edgeY) < 0.5);
+      pinX = rw / 2 + near.reduce((sum, p) => sum + p.x, 0) / near.length;
+      pinY = rh / 2 + edgeY;
+    } else if (pinAsRightEdge) {
       if (angle > 0) {
         // right edge higher for +angle → TOP-RIGHT, nudge down
         pinX = rw;  pinY = 0 + nudgePx;

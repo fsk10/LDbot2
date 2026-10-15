@@ -12,8 +12,6 @@
     "invertNameOffsetY": false,
     "anchorNudgePct": 0.6,
     "anchorNudgePx": null,
-    "anchorXNudgePx": null,
-    "anchorXNudgePct": 0.30,
     "debug": false
   },
   "uploads": {
