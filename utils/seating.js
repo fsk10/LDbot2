@@ -1,5 +1,6 @@
 // utils/seating.js
 const Jimp = require('jimp');
+const { createCanvas, registerFont } = require('canvas');
 const path = require('path');
 const fs = require('fs').promises;
 const fsSync = require('fs');
@@ -13,9 +14,76 @@ function ensureDirSync(p) {
   if (!fsSync.existsSync(p)) fsSync.mkdirSync(p, { recursive: true });
 }
 
-function resolveJimpFont(fontKey) {
-  const key = String(fontKey || 'FONT_SANS_16_BLACK');
-  return Jimp[key] || Jimp.FONT_SANS_16_BLACK;
+// Names are drawn with node-canvas (anti-aliased text and rotation, real TTF font),
+// then composited onto the Jimp map. Open Sans is bundled in fonts/ (OFL licence).
+const NAME_FONT_FAMILY = 'Open Sans';
+const FONT_FILES = [
+  { file: 'OpenSans-Regular.ttf', weight: 'normal' },
+  { file: 'OpenSans-Bold.ttf', weight: 'bold' },
+];
+for (const { file, weight } of FONT_FILES) {
+  try {
+    registerFont(path.join(__dirname, '..', 'fonts', file), { family: NAME_FONT_FAMILY, weight });
+  } catch (e) {
+    logger.warn(`Seating: could not load font ${file}, names fall back to sans-serif: ${e.message}`);
+  }
+}
+
+function nameStyle() {
+  const s = config.seating || {};
+  const size = Number(s.nameFontSize) || 15;
+  return {
+    font: `${s.nameFontWeight || 'bold'} ${size}px "${NAME_FONT_FAMILY}", sans-serif`,
+    color: s.nameColor || '#000000',
+    stroke: s.nameStrokeColor || '#ffffff',
+    strokeWidth: Number.isFinite(s.nameStrokeWidth) ? s.nameStrokeWidth : 2,
+  };
+}
+
+/**
+ * Draw a (rotated) name. Returns the image plus the unrotated text box size;
+ * the text is centred in the image, which is what the pin math relies on.
+ */
+async function renderName(nick, angle, maxWidth) {
+  const style = nameStyle();
+  const measure = createCanvas(1, 1).getContext('2d');
+  measure.font = style.font;
+
+  let text = nick;
+  if (maxWidth > 0) {
+    while (text.length > 1 && measure.measureText(text).width > maxWidth) text = text.slice(0, -1);
+    if (text !== nick) text = text.replace(/.?.?$/, '..');
+  }
+  // Height from fixed glyphs so every name gets the same box, whatever its letters
+  const ref = measure.measureText('Hgjy');
+  const pad = Math.ceil(style.strokeWidth);
+  const textWidth = Math.ceil((maxWidth > 0 ? maxWidth : measure.measureText(text).width) + pad * 2);
+  const textHeight = Math.ceil(ref.actualBoundingBoxAscent + ref.actualBoundingBoxDescent + pad * 2);
+
+  const rad = -angle * Math.PI / 180; // canvas rotates clockwise for positive angles
+  const c = Math.abs(Math.cos(rad)), s = Math.abs(Math.sin(rad));
+  const rw = Math.max(1, Math.ceil(textWidth * c + textHeight * s));
+  const rh = Math.max(1, Math.ceil(textWidth * s + textHeight * c));
+
+  const canvas = createCanvas(rw, rh);
+  const ctx = canvas.getContext('2d');
+  ctx.translate(rw / 2, rh / 2);
+  ctx.rotate(rad);
+  ctx.font = style.font;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+  const x = -textWidth / 2 + pad;
+  const y = -textHeight / 2 + pad + ref.actualBoundingBoxAscent;
+  if (style.strokeWidth > 0) {
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = style.strokeWidth * 2; // stroke is centred on the outline
+    ctx.strokeStyle = style.stroke;
+    ctx.strokeText(text, x, y);
+  }
+  ctx.fillStyle = style.color;
+  ctx.fillText(text, x, y);
+
+  return { textImg: await Jimp.read(canvas.toBuffer('image/png')), textWidth, textHeight };
 }
 
 async function loadChartById(chartId) {
@@ -135,8 +203,6 @@ async function renderMapForEvent(eventRow, occupied, pendingColor, occupiedColor
     : path.join(root, chart.image?.path || 'SeatingMap.png');
 
   const image = await Jimp.read(basePath);
-  const fontConst = resolveJimpFont(config.seating?.font);
-  const font = await Jimp.loadFont(fontConst);
 
   const byId = new Map();
   for (const s of chart.seats) {
@@ -163,23 +229,9 @@ async function renderMapForEvent(eventRow, occupied, pendingColor, occupiedColor
 
     const nick = truncateName(occ.nickname, config.seating?.nameMaxChars ?? 12);
 
-    // Measure unrotated text
-    const textWidth  = nameMaxWidth > 0 ? nameMaxWidth : Jimp.measureText(font, nick);
-    const textHeight = Jimp.measureTextHeight(font, nick, textWidth || 1);
-
-    // Render unrotated text surface
-    let textImg = await new Jimp(Math.max(1, textWidth), Math.max(1, textHeight), 0x00000000);
-    textImg.print(
-      font,
-      0, 0,
-      { text: nick, alignmentX: Jimp.HORIZONTAL_ALIGN_LEFT, alignmentY: Jimp.VERTICAL_ALIGN_TOP },
-      textWidth,
-      textHeight
-    );
-
-    // Rotate around center (auto-resize)
+    // Positive angle = counter-clockwise on the image (Jimp's convention, kept for the pin math below)
     const angle = nameRotation ? (invertRotation ? -nameRotation : nameRotation) : 0;
-    if (angle) textImg = textImg.rotate(angle, true);
+    const { textImg, textWidth, textHeight } = await renderName(nick, angle, nameMaxWidth);
 
     // Rotated dimensions
     const rw = textImg.bitmap.width;
@@ -311,6 +363,5 @@ module.exports = {
   validateChart,
   renderMapForEvent,
   ensureDirSync,
-  resolveJimpFont,
   invalidateChartCache
 };
