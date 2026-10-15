@@ -35,10 +35,11 @@ function nameStyle() {
   return {
     font: `${s.nameFontWeight || 'bold'} ${size}px "${NAME_FONT_FAMILY}", sans-serif`,
     color: s.nameColor || '#000000',
-    stroke: s.nameStrokeColor || '#ffffff',
-    strokeWidth: Number.isFinite(s.nameStrokeWidth) ? s.nameStrokeWidth : 2,
   };
 }
+
+// Margin around the text so anti-aliased glyph edges are never clipped
+const NAME_PAD_PX = 1;
 
 /**
  * Draw a (rotated) name. Returns the image plus the unrotated text box size;
@@ -56,7 +57,7 @@ async function renderName(nick, angle, maxWidth) {
   }
   // Height from fixed glyphs so every name gets the same box, whatever its letters
   const ref = measure.measureText('Hgjy');
-  const pad = Math.ceil(style.strokeWidth);
+  const pad = NAME_PAD_PX;
   const textWidth = Math.ceil((maxWidth > 0 ? maxWidth : measure.measureText(text).width) + pad * 2);
   const textHeight = Math.ceil(ref.actualBoundingBoxAscent + ref.actualBoundingBoxDescent + pad * 2);
 
@@ -74,12 +75,6 @@ async function renderName(nick, angle, maxWidth) {
   ctx.textBaseline = 'alphabetic';
   const x = -textWidth / 2 + pad;
   const y = -textHeight / 2 + pad + ref.actualBoundingBoxAscent;
-  if (style.strokeWidth > 0) {
-    ctx.lineJoin = 'round';
-    ctx.lineWidth = style.strokeWidth * 2; // stroke is centred on the outline
-    ctx.strokeStyle = style.stroke;
-    ctx.strokeText(text, x, y);
-  }
   ctx.fillStyle = style.color;
   ctx.fillText(text, x, y);
 

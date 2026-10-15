@@ -5,8 +5,6 @@
     "nameFontSize": 15,
     "nameFontWeight": "bold",
     "nameColor": "#000000",
-    "nameStrokeColor": "#ffffff",
-    "nameStrokeWidth": 2,
     "nameMaxChars": 11,
     "overlay": {
       "occupied": "rgba(230,20,20,0.5)",
