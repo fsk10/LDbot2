@@ -140,7 +140,7 @@ async function executeSend(interaction) {
   const localPretty = formatDisplayDate(atUTCdate); // shows CET/CEST
   logActivity(interaction.client,
     `Announcement for **${event.name}** in <#${targetChan.id}> was **scheduled** for **${localPretty}** by **${interaction.user.tag}**` +
-    ` 🔹 opens registration: ${openOnPost ? 'yes' : 'no'}`,
+    ` :white_small_square: opens registration: ${openOnPost ? 'yes' : 'no'}`,
     { eventId: event.id }
   );
   return interaction.reply({
@@ -157,8 +157,8 @@ async function executeList(interaction) {
   const names = await eventNames(jobs);
   const lines = jobs.map(j =>
     `\`${j.id.slice(0, 6)}\` **${names.get(j.eventId) || `Event ${j.eventId} (missing)`}** → <#${j.channelId}>` +
-    ` 🔹 **${jobTime(j)}** (${toDiscordTimestamp(new Date(j.announceAtISO), 'R')})` +
-    ` 🔹 opens registration: ${j.openOnPost ? 'yes' : 'no'} 🔹 by ${j.requestedBy || 'unknown'}`
+    ` :white_small_square: **${jobTime(j)}** (${toDiscordTimestamp(new Date(j.announceAtISO), 'R')})` +
+    ` :white_small_square: opens registration: ${j.openOnPost ? 'yes' : 'no'} :white_small_square: by ${j.requestedBy || 'unknown'}`
   );
 
   let content = `**Scheduled announcements (${jobs.length})**\n${lines.join('\n')}`;
