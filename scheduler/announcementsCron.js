@@ -104,6 +104,25 @@ async function reportMissedJob(client, job, due) {
   logActivity(client, msg, { eventId: event ? event.id : undefined });
 }
 
+// Readable reason for the admin log; full error stays in the bot log.
+function failureReason(err) {
+  switch (err?.code) {
+    case 50001: return 'the bot has no access to the channel';
+    case 50013: return 'the bot is missing permissions in the channel';
+    case 10003: return 'the channel no longer exists';
+    default: return 'see the bot log for details';
+  }
+}
+
+// The scheduler tried to post but couldn't; tell the admins in the log channel.
+function reportFailedJob(client, job, event, reason, regOpened) {
+  const name = event ? `**${event.name}**` : `event id ${job.eventId} (no longer exists)`;
+  let msg = `❌ Scheduled announcement for ${name} in <#${job.channelId}> at **${formatDisplayDate(new Date(job.announceAtISO))}** **failed**: ${reason}.`;
+  if (regOpened) msg += '\nRegistration **was opened** before the post failed.';
+  msg += '\nPost it manually with **/adminannounce send**.';
+  logActivity(client, msg, { eventId: event ? event.id : undefined });
+}
+
 // Run every minute from app.js. Fires due jobs and prunes completed ones.
 async function tickAnnounceJobs(client) {
   try {
@@ -149,6 +168,7 @@ async function tickAnnounceJobs(client) {
           const event = await EventModel.findByPk(job.eventId);
           if (!event) {
             logger.warn(`[announce-jobs] Event ${job.eventId} not found for job ${job.id}`);
+            reportFailedJob(client, job, null, 'the event no longer exists', false);
             job.status = 'failed';
             job.attempts = (job.attempts || 0) + 1;
             mutated = true;
@@ -156,8 +176,10 @@ async function tickAnnounceJobs(client) {
           }
 
           // Optionally open registration
+          let regOpened = false;
           if (job.openOnPost && !event.regopen) {
             await event.update({ regopen: true });
+            regOpened = true;
             logActivity(
               client,
               `Event **${event.name}** was updated by [ **Scheduler** ]\n:white_small_square: **Registration Status**: Open`,
@@ -169,6 +191,7 @@ async function tickAnnounceJobs(client) {
             await postAnnouncementForJob(client, event, job.channelId);
           } catch (e) {
             logger.error(`[announce-jobs] Post failed for job ${job.id}: ${e.message}`);
+            reportFailedJob(client, job, event, failureReason(e), regOpened);
             job.status = 'failed';
             job.attempts = (job.attempts || 0) + 1;
             mutated = true;

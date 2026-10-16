@@ -2,7 +2,7 @@
 const { SlashCommandBuilder, EmbedBuilder, ChannelType } = require('discord.js');
 const { EventModel } = require('../../models');
 const { isAdmin } = require('../../utils/permissions');
-const { formatDisplayDate, parseLocalToUTC } = require('../../utils/dateUtils');
+const { formatDisplayDate, parseLocalToUTC, toDiscordTimestamp } = require('../../utils/dateUtils');
 const logActivity = require('../../utils/logActivity');
 const logger = require('../../utils/logger');
 const { enqueueAnnouncementJob, listPendingJobs, cancelAnnouncementJob } = require('../../scheduler/announcementsCron');
@@ -138,6 +138,11 @@ async function executeSend(interaction) {
   }
 
   const localPretty = formatDisplayDate(atUTCdate); // shows CET/CEST
+  logActivity(interaction.client,
+    `Announcement for **${event.name}** in <#${targetChan.id}> was **scheduled** for **${localPretty}** by **${interaction.user.tag}**` +
+    ` 🔹 opens registration: ${openOnPost ? 'yes' : 'no'}`,
+    { eventId: event.id }
+  );
   return interaction.reply({
     content: `🗓️ Scheduled announcement for **${event.name}** in ${targetChan} at **${localPretty}**.`,
     ephemeral: true
@@ -151,8 +156,9 @@ async function executeList(interaction) {
   }
   const names = await eventNames(jobs);
   const lines = jobs.map(j =>
-    `\`${j.id.slice(0, 6)}\` **${names.get(j.eventId) || `Event ${j.eventId} (missing)`}** → <#${j.channelId}> at **${jobTime(j)}**` +
-    ` · opens registration: ${j.openOnPost ? 'yes' : 'no'} · by ${j.requestedBy || 'unknown'}`
+    `\`${j.id.slice(0, 6)}\` **${names.get(j.eventId) || `Event ${j.eventId} (missing)`}** → <#${j.channelId}>` +
+    ` 🔹 **${jobTime(j)}** (${toDiscordTimestamp(new Date(j.announceAtISO), 'R')})` +
+    ` 🔹 opens registration: ${j.openOnPost ? 'yes' : 'no'} 🔹 by ${j.requestedBy || 'unknown'}`
   );
 
   let content = `**Scheduled announcements (${jobs.length})**\n${lines.join('\n')}`;
