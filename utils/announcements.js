@@ -1,14 +1,31 @@
 // utils/announcements.js
 // Builds and posts the signup announcement. Shared by /adminannounce and the
 // scheduler, kept here so neither has to require the other.
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ChannelType } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ChannelType, PermissionFlagsBits } = require('discord.js');
 const { EventModel } = require('../models');
 const { formatDisplayDate } = require('./dateUtils');
 const logActivity = require('./logActivity');
 const { getAvailableSeatsForEvent } = require('../database/operations');
 
+// Everything a full announcement needs: the embed, the button and a working @everyone ping.
+const REQUIRED_PERMISSIONS = [
+  [PermissionFlagsBits.ViewChannel, 'View Channel'],
+  [PermissionFlagsBits.SendMessages, 'Send Messages'],
+  [PermissionFlagsBits.EmbedLinks, 'Embed Links'],
+  [PermissionFlagsBits.MentionEveryone, 'Mention @everyone'],
+];
+
+// announceReason is safe to show admins.
+class AnnounceChannelError extends Error {
+  constructor(reason) {
+    super(reason);
+    this.announceReason = reason;
+  }
+}
+
 // Readable reason for the admin log; full error stays in the bot log.
 function failureReason(err) {
+  if (err?.announceReason) return err.announceReason;
   switch (err?.code) {
     case 50001: return 'the bot has no access to the channel';
     case 50013: return 'the bot is missing permissions in the channel';
@@ -18,13 +35,35 @@ function failureReason(err) {
 }
 
 /**
+ * Fetch the target channel and make sure the bot can post a full announcement
+ * there. Throws AnnounceChannelError (with announceReason) when it can't.
+ */
+async function getAnnounceChannel(client, channelId) {
+  let channel;
+  try {
+    channel = await client.channels.fetch(channelId);
+  } catch (e) {
+    if (e?.code === 50001 || e?.code === 10003) throw new AnnounceChannelError(failureReason(e));
+    throw e;
+  }
+  if (!channel || ![ChannelType.GuildText, ChannelType.GuildAnnouncement].includes(channel.type)) {
+    throw new AnnounceChannelError('the channel is not a text or announcement channel');
+  }
+
+  const me = channel.guild.members.me ?? await channel.guild.members.fetchMe();
+  const perms = channel.permissionsFor(me);
+  const missing = REQUIRED_PERMISSIONS.filter(([flag]) => !perms?.has(flag)).map(([, label]) => label);
+  if (missing.length) {
+    throw new AnnounceChannelError(`the bot is missing permissions in the channel: ${missing.join(', ')}`);
+  }
+  return channel;
+}
+
+/**
  * Build & send the announcement post for a given event/channel.
  */
 async function postAnnouncementForJob(client, event, channelId) {
-  const channel = await client.channels.fetch(channelId);
-  if (!channel || ![ChannelType.GuildText, ChannelType.GuildAnnouncement].includes(channel.type)) {
-    throw new Error('Target channel not found or not a text/announcement channel.');
-  }
+  const channel = await getAnnounceChannel(client, channelId);
 
   const seatsInfo = await getAvailableSeatsForEvent(event.id);
   if (!seatsInfo?.success) {
@@ -103,4 +142,4 @@ async function runAnnouncementNow(client, { eventId, channelId, openOnPost, acto
   logActivity(client, `Event **${event.name}** announced in <#${channelId}> by **${actorTag || 'Scheduler'}**`, { eventId: event.id });
 }
 
-module.exports = { postAnnouncementForJob, runAnnouncementNow, failureReason };
+module.exports = { getAnnounceChannel, postAnnouncementForJob, runAnnouncementNow, failureReason };

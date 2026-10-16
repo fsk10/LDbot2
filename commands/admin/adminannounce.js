@@ -6,7 +6,7 @@ const { formatDisplayDate, parseLocalToUTC, toDiscordTimestamp } = require('../.
 const logActivity = require('../../utils/logActivity');
 const logger = require('../../utils/logger');
 const { enqueueAnnouncementJob, listPendingJobs, cancelAnnouncementJob } = require('../../scheduler/announcementsCron');
-const { runAnnouncementNow } = require('../../utils/announcements');
+const { getAnnounceChannel, runAnnouncementNow } = require('../../utils/announcements');
 
 const commandData = new SlashCommandBuilder()
   .setName('adminannounce')
@@ -110,9 +110,23 @@ async function executeSend(interaction) {
     }
   }
 
+  const postNow = !atUTCdate || atUTCdate.getTime() <= Date.now();
+
+  // Refuse up front if the bot can't post a full announcement there, before
+  // anything is scheduled or registration is opened
+  await interaction.deferReply({ ephemeral: true });
+  try {
+    await getAnnounceChannel(interaction.client, targetChan.id);
+  } catch (e) {
+    if (!e.announceReason) throw e;
+    const nothingDone = postNow
+      ? (openOnPost ? 'Nothing was posted and registration was not opened.' : 'Nothing was posted.')
+      : 'Nothing was scheduled.';
+    return interaction.editReply(`❌ Can't post in ${targetChan}: ${e.announceReason}. ${nothingDone} Fix the channel permissions and try again.`);
+  }
+
   // No schedule, or past/now → post now
-  if (!atUTCdate || atUTCdate.getTime() <= Date.now()) {
-    await interaction.deferReply({ ephemeral: true });
+  if (postNow) {
 
     try {
       await runAnnouncementNow(interaction.client, {
@@ -143,7 +157,7 @@ async function executeSend(interaction) {
   });
 
   if (!ok) {
-    return interaction.reply({ content: '❌ Failed to schedule announcement.', ephemeral: true });
+    return interaction.editReply('❌ Failed to schedule announcement.');
   }
 
   const localPretty = formatDisplayDate(atUTCdate); // shows CET/CEST
@@ -152,10 +166,7 @@ async function executeSend(interaction) {
     ` :white_small_square: opens registration: ${openOnPost ? 'yes' : 'no'}`,
     { eventId: event.id }
   );
-  return interaction.reply({
-    content: `🗓️ Scheduled announcement for **${event.name}** in ${targetChan} at **${localPretty}**.`,
-    ephemeral: true
-  });
+  return interaction.editReply(`🗓️ Scheduled announcement for **${event.name}** in ${targetChan} at **${localPretty}**.`);
 }
 
 async function executeList(interaction) {
