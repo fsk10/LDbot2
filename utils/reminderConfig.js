@@ -9,7 +9,7 @@ const logger = require('./logger');
 const FILE = path.join(__dirname, '..', 'config', 'reminderConfig.json');
 const REQUIRED = {
   channel: ['title', 'line', 'overdueLine', 'footer'],
-  dm: ['text', 'overdueText'],
+  dm: ['title', 'text', 'overdueText'],
 };
 
 function load() {

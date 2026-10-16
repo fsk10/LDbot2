@@ -3,14 +3,15 @@
 // The deadline counts from eventUsers.participantsince; texts and the channel
 // come from config/reminderConfig.json (utils/reminderConfig.js).
 const { DateTime } = require('luxon');
-const { PermissionFlagsBits, ChannelType } = require('discord.js');
+const { PermissionFlagsBits, ChannelType, EmbedBuilder } = require('discord.js');
 const { EventUsersModel, UserModel } = require('../models');
 const { getReminderConfig, fillTemplate } = require('./reminderConfig');
 const logger = require('./logger');
 
 const TZ = 'Europe/Stockholm';
 const SEND_HOUR = 12; // automatic reminders go out at 12:00 Stockholm time
-const MAX_MESSAGE = 2000;
+const EMBED_COLOR = '#3498db'; // same blue as the signup announcement
+const ROWS_PER_MESSAGE = 30; // mentions + deadline lines per channel message
 const REMINDER_DAY_FIELDS = ['reminderfirstday', 'remindersecondday'];
 
 // Message is safe to show admins; details go to the bot log.
@@ -68,13 +69,13 @@ function nameList(names, max = 1500) {
   return text.length > max ? `${text.slice(0, max)}…` : text;
 }
 
-function dmText(cfg, event, row, now = new Date()) {
-  const template = isOverdue(row, event, now) ? cfg.dm.overdueText : cfg.dm.text;
-  return fillTemplate(template, {
-    event: event.name,
-    seat: row.seat ?? '—',
-    deadline: deadlineLabel(row, event),
-  });
+function dmEmbed(cfg, event, row, now = new Date()) {
+  const values = { event: event.name, seat: row.seat ?? '—', deadline: deadlineLabel(row, event) };
+  const text = isOverdue(row, event, now) ? cfg.dm.overdueText : cfg.dm.text;
+  return new EmbedBuilder()
+    .setColor(EMBED_COLOR)
+    .setTitle(fillTemplate(cfg.dm.title, values).slice(0, 256))
+    .setDescription(fillTemplate(text, values).slice(0, 4096));
 }
 
 /**
@@ -89,7 +90,7 @@ async function sendReminderDms(client, event, rows, now = new Date()) {
   for (const row of rows) {
     try {
       const user = await client.users.fetch(row.user.discorduser);
-      await user.send({ content: dmText(cfg, event, row, now), allowedMentions: { parse: [] } });
+      await user.send({ embeds: [dmEmbed(cfg, event, row, now)] });
       sent.push(nickOf(row));
     } catch (e) {
       logger.warn(`Payment reminder DM to ${nickOf(row)} (event ${event.id}) failed: ${e.message}`);
@@ -99,27 +100,30 @@ async function sendReminderDms(client, event, rows, now = new Date()) {
   return { sent, failed };
 }
 
-// Channel text split into messages under Discord's 2000 character limit.
+// Channel reminder as messages of { content, embed, users }: the content holds
+// only the mentions (mentions inside an embed are shown but never ping), the
+// embed holds the title, one deadline line per user and the footer (last
+// message only). ROWS_PER_MESSAGE keeps both under Discord's limits.
 function buildChannelMessages(cfg, event, rows, now = new Date()) {
-  const title = fillTemplate(cfg.channel.title, { event: event.name });
+  const title = fillTemplate(cfg.channel.title, { event: event.name }).slice(0, 256);
   const footer = fillTemplate(cfg.channel.footer, { event: event.name });
-  const lines = rows.map(row => fillTemplate(
-    isOverdue(row, event, now) ? cfg.channel.overdueLine : cfg.channel.line,
-    { mention: `<@${row.user.discorduser}>`, deadline: deadlineLabel(row, event), seat: row.seat ?? '—', event: event.name }
-  ));
-
   const messages = [];
-  let current = title;
-  for (const line of [...lines, '', footer]) {
-    if (current.length + 1 + line.length > MAX_MESSAGE) {
-      messages.push(current);
-      current = line;
-    } else {
-      current += `\n${line}`;
-    }
+  for (let i = 0; i < rows.length; i += ROWS_PER_MESSAGE) {
+    const chunk = rows.slice(i, i + ROWS_PER_MESSAGE);
+    const users = chunk.map(row => row.user.discorduser);
+    const lines = chunk.map(row => fillTemplate(
+      isOverdue(row, event, now) ? cfg.channel.overdueLine : cfg.channel.line,
+      { mention: `<@${row.user.discorduser}>`, deadline: deadlineLabel(row, event), seat: row.seat ?? '—', event: event.name }
+    ));
+    const isLast = i + ROWS_PER_MESSAGE >= rows.length;
+    const description = (isLast ? [...lines, '', footer] : lines).join('\n').slice(0, 4096);
+    messages.push({
+      content: users.map(id => `<@${id}>`).join(' '),
+      embed: new EmbedBuilder().setColor(EMBED_COLOR).setTitle(title).setDescription(description),
+      users,
+    });
   }
-  messages.push(current);
-  return messages.map(m => m.slice(0, MAX_MESSAGE));
+  return messages;
 }
 
 // Fetch the configured reminder channel and check the bot can post there.
@@ -139,7 +143,7 @@ async function getReminderChannel(client) {
   }
   const me = channel.guild.members.me ?? await channel.guild.members.fetchMe();
   const perms = channel.permissionsFor(me);
-  const missing = [[PermissionFlagsBits.ViewChannel, 'View Channel'], [PermissionFlagsBits.SendMessages, 'Send Messages']]
+  const missing = [[PermissionFlagsBits.ViewChannel, 'View Channel'], [PermissionFlagsBits.SendMessages, 'Send Messages'], [PermissionFlagsBits.EmbedLinks, 'Embed Links']]
     .filter(([flag]) => !perms?.has(flag)).map(([, label]) => label);
   if (missing.length) {
     throw new ReminderError(`The bot is missing permissions in the reminder channel: ${missing.join(', ')}.`);
@@ -151,9 +155,8 @@ async function getReminderChannel(client) {
 async function postChannelReminder(client, event, rows, now = new Date()) {
   const channel = await getReminderChannel(client);
   const cfg = getReminderConfig();
-  for (const content of buildChannelMessages(cfg, event, rows, now)) {
-    const users = [...content.matchAll(/<@(\d+)>/g)].map(m => m[1]);
-    await channel.send({ content, allowedMentions: { parse: [], users } });
+  for (const { content, embed, users } of buildChannelMessages(cfg, event, rows, now)) {
+    await channel.send({ content, embeds: [embed], allowedMentions: { parse: [], users } });
   }
   return channel;
 }
