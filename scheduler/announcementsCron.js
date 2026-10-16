@@ -4,10 +4,42 @@ const { DateTime } = require('luxon');
 const crypto = require('crypto');
 const logger = require('../utils/logger');
 const logActivity = require('../utils/logActivity');
+const { withEventLock } = require('../utils/eventLock');
+const { formatDisplayDate } = require('../utils/dateUtils');
+const { postAnnouncementForJob } = require('../utils/announcements');
 const SETTINGS_KEY = 'announce_jobs';
+const LOCK_KEY = 'announce-jobs';
+const GRACE_MIN = 2; // minutes of LATE tolerance (never early); later than this counts as missed
 
 function makeId() {
   return crypto.randomBytes(10).toString('hex'); // small, unique-ish
+}
+
+// All reads-modify-writes of the job list go through this lock, so the
+// scheduler, /adminannounce send and /adminannounce cancel can't overwrite
+// each other's changes.
+function withJobsLock(fn) {
+  return withEventLock(LOCK_KEY, fn);
+}
+
+async function loadJobs() {
+  let row = await SettingsModel.findOne({ where: { key: SETTINGS_KEY } });
+  let jobs = [];
+  if (row) {
+    try {
+      const parsed = JSON.parse(row.value || '[]');
+      jobs = Array.isArray(parsed) ? parsed : [];
+    } catch {
+      throw new Error('announce_jobs setting is not valid JSON');
+    }
+  }
+  return { row, jobs };
+}
+
+async function saveJobs(row, jobs) {
+  const value = JSON.stringify(jobs);
+  if (row) await row.update({ value });
+  else await SettingsModel.create({ key: SETTINGS_KEY, value, description: 'Scheduled announcement jobs' });
 }
 
 /**
@@ -17,38 +49,21 @@ function makeId() {
 async function enqueueAnnouncementJob({ eventId, channelId, announceAtDate, openOnPost = false, requestedBy = 'unknown' }) {
   try {
     const iso = DateTime.fromJSDate(announceAtDate, { zone: 'utc' }).toISO();
-    let row = await SettingsModel.findOne({ where: { key: SETTINGS_KEY } });
-
-    if (!row) {
-      row = await SettingsModel.create({
-        key: SETTINGS_KEY,
-        value: JSON.stringify([]),
-        description: 'Scheduled announcement jobs',
+    await withJobsLock(async () => {
+      const { row, jobs } = await loadJobs();
+      jobs.push({
+        id: makeId(),
+        eventId,
+        channelId,
+        announceAtISO: iso,      // UTC time
+        openOnPost: !!openOnPost,
+        requestedBy,
+        status: 'pending',
+        attempts: 0,
+        postedAtISO: null
       });
-    }
-
-    let jobs = [];
-    try {
-      jobs = JSON.parse(row.value || '[]');
-      if (!Array.isArray(jobs)) jobs = [];
-    } catch {
-      jobs = [];
-    }
-
-    const job = {
-      id: makeId(),
-      eventId,
-      channelId,
-      announceAtISO: iso,      // UTC time
-      openOnPost: !!openOnPost,
-      requestedBy,
-      status: 'pending',
-      attempts: 0,
-      postedAtISO: null
-    };
-
-    jobs.push(job);
-    await row.update({ value: JSON.stringify(jobs) });
+      await saveJobs(row, jobs);
+    });
     return true;
   } catch (e) {
     logger.error(`[announce-jobs] enqueue failed: ${e.stack || e}`);
@@ -56,42 +71,79 @@ async function enqueueAnnouncementJob({ eventId, channelId, announceAtDate, open
   }
 }
 
+// Pending jobs, soonest first.
+async function listPendingJobs() {
+  const { jobs } = await loadJobs();
+  return jobs
+    .filter(j => j.status === 'pending')
+    .sort((a, b) => String(a.announceAtISO).localeCompare(String(b.announceAtISO)));
+}
+
+// Removes a pending job. Returns the removed job, or null if there was none with that id.
+async function cancelAnnouncementJob(jobId) {
+  return withJobsLock(async () => {
+    const { row, jobs } = await loadJobs();
+    const idx = jobs.findIndex(j => j.id === jobId && j.status === 'pending');
+    if (idx === -1) return null;
+    const [job] = jobs.splice(idx, 1);
+    await saveJobs(row, jobs);
+    return job;
+  });
+}
+
+// The job's due time was passed by more than the grace period (bot offline or
+// stalled). It is never sent late; admins are told so they can do it by hand.
+async function reportMissedJob(client, job, due) {
+  const event = await EventModel.findByPk(job.eventId);
+  const name = event ? `**${event.name}**` : `event id ${job.eventId} (no longer exists)`;
+  let msg = `⚠️ Scheduled announcement for ${name} in <#${job.channelId}> was due at **${formatDisplayDate(due.toJSDate())}** but was **not sent** (the bot was offline).`;
+  if (job.openOnPost && event && !event.regopen) {
+    msg += '\nRegistration was **not opened** either.';
+  }
+  msg += '\nPost it manually with **/adminannounce send** if it is still needed.';
+  logActivity(client, msg, { eventId: event ? event.id : undefined });
+}
+
 // Run every minute from app.js. Fires due jobs and prunes completed ones.
 async function tickAnnounceJobs(client) {
   try {
-    const row = await SettingsModel.findOne({ where: { key: SETTINGS_KEY } });
-    if (!row) return;
-
-    let jobs = [];
-    try {
-      const raw = row.value || '[]';
-      const parsed = JSON.parse(raw);
-      jobs = Array.isArray(parsed) ? parsed : [];
-    } catch {
-      logger.error('[announce-jobs] settings value is not valid JSON');
-      return;
-    }
-
-    const nowUtc = DateTime.utc();
-    const graceMin = 2; // minutes of LATE tolerance (never early)
-    let mutated = false;
-
-    for (const job of jobs) {
+    await withJobsLock(async () => {
+      let row, jobs;
       try {
-        if (job.status !== 'pending') continue;
+        ({ row, jobs } = await loadJobs());
+      } catch (e) {
+        logger.error(`[announce-jobs] ${e.message}`);
+        return;
+      }
+      if (!row) return;
 
-        const due = DateTime.fromISO(job.announceAtISO, { zone: 'utc' });
-        if (!due.isValid) {
-          logger.warn(`[announce-jobs] Skipping job ${job.id}: invalid date ${job.announceAtISO}`);
-          job.status = 'failed';
-          job.attempts = (job.attempts || 0) + 1;
-          mutated = true;
-          continue;
-        }
+      const nowUtc = DateTime.utc();
+      let mutated = false;
 
-        // Only fire at/after due time, with up to N minutes late grace
-        const minutesLate = nowUtc.diff(due, 'minutes').minutes;
-        if (minutesLate >= 0 && minutesLate <= graceMin) {
+      for (const job of jobs) {
+        try {
+          if (job.status !== 'pending') continue;
+
+          const due = DateTime.fromISO(job.announceAtISO, { zone: 'utc' });
+          if (!due.isValid) {
+            logger.warn(`[announce-jobs] Skipping job ${job.id}: invalid date ${job.announceAtISO}`);
+            job.status = 'failed';
+            job.attempts = (job.attempts || 0) + 1;
+            mutated = true;
+            continue;
+          }
+
+          const minutesLate = nowUtc.diff(due, 'minutes').minutes;
+          if (minutesLate < 0) continue;
+
+          if (minutesLate > GRACE_MIN) {
+            logger.warn(`[announce-jobs] Job ${job.id} missed (due ${due.toISO()}, ${Math.round(minutesLate)} min late), not sending`);
+            job.status = 'missed';
+            mutated = true;
+            await reportMissedJob(client, job, due);
+            continue;
+          }
+
           logger.info(`[announce-jobs] Firing job ${job.id} (due ${due.toISO()})`);
 
           const event = await EventModel.findByPk(job.eventId);
@@ -113,10 +165,7 @@ async function tickAnnounceJobs(client) {
             );
           }
 
-          // Post the announcement (uses your helper exported from adminannounce)
-          // Lazy require to avoid circular dependency (adminannounce ↔ announcementsCron)
           try {
-            const { postAnnouncementForJob } = require('../commands/admin/adminannounce');
             await postAnnouncementForJob(client, event, job.channelId);
           } catch (e) {
             logger.error(`[announce-jobs] Post failed for job ${job.id}: ${e.message}`);
@@ -131,17 +180,17 @@ async function tickAnnounceJobs(client) {
           job.postedAtISO = nowUtc.toISO();
           job.attempts = (job.attempts || 0) + 1;
           mutated = true;
+        } catch (e) {
+          logger.error(`[announce-jobs] Error in job loop: ${e.stack || e}`);
         }
-      } catch (e) {
-        logger.error(`[announce-jobs] Error in job loop: ${e.stack || e}`);
       }
-    }
 
-    // Auto-remove completed/failed jobs, keep only pending
-    const newJobs = jobs.filter(j => j.status === 'pending');
-    if (mutated || newJobs.length !== jobs.length) {
-      await row.update({ value: JSON.stringify(newJobs) });
-    }
+      // Auto-remove completed/failed/missed jobs, keep only pending
+      const newJobs = jobs.filter(j => j.status === 'pending');
+      if (mutated || newJobs.length !== jobs.length) {
+        await saveJobs(row, newJobs);
+      }
+    });
   } catch (e) {
     logger.error(`[announce-jobs] tick failed: ${e.stack || e}`);
   }
@@ -149,5 +198,7 @@ async function tickAnnounceJobs(client) {
 
 module.exports = {
   enqueueAnnouncementJob,
+  listPendingJobs,
+  cancelAnnouncementJob,
   tickAnnounceJobs,
 };

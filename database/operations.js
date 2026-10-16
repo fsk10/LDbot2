@@ -658,23 +658,51 @@ function truncateNickname(nickname) {
   return nickname.length > 12 ? nickname.substring(0, 10) + '..' : nickname;
 }
 
-// Hard purge channel (handles old messages too)
+const UNKNOWN_MESSAGE = 10008; // Discord: message already deleted
+
+// Hard purge channel (handles old messages too). A message that disappears
+// while we work (Unknown Message) counts as deleted instead of aborting.
 async function purgeChannel(channel) {
   try {
-    let fetched;
-    do {
-      fetched = await channel.messages.fetch({ limit: 100 });
-      const newer = fetched.filter(m => Date.now() - m.createdTimestamp < 14 * 24 * 60 * 60 * 1000);
-      const older = fetched.filter(m => !newer.has(m.id));
+    for (;;) {
+      const fetched = await channel.messages.fetch({ limit: 100 });
+      if (fetched.size === 0) return;
+
+      // a minute's margin so nothing ages past 14 days between fetch and delete
+      const bulkCutoff = Date.now() - (14 * 24 * 60 * 60 * 1000 - 60 * 1000);
+      let oneByOne = fetched.filter(m => m.createdTimestamp <= bulkCutoff);
+      const newer = fetched.filter(m => m.createdTimestamp > bulkCutoff);
+      let deleted = 0;
 
       if (newer.size > 0) {
-        await channel.bulkDelete(newer, true);
+        try {
+          // the returned collection can be empty for a single uncached message, so count what we sent
+          await channel.bulkDelete(newer, true);
+          deleted += newer.size;
+        } catch (e) {
+          if (e?.code !== UNKNOWN_MESSAGE) throw e;
+          // one of them was deleted meanwhile; fall back to deleting each
+          oneByOne = fetched;
+        }
       }
-      // delete older one by one (Discord doesn't bulk-delete >14d)
-      for (const m of older.values()) {
-        try { await m.delete(); } catch {}
+
+      // Discord doesn't bulk-delete messages older than 14 days
+      for (const m of oneByOne.values()) {
+        try {
+          await m.delete();
+          deleted++;
+        } catch (e) {
+          if (e?.code === UNKNOWN_MESSAGE) deleted++;
+          else logger.warn(`purgeChannel: could not delete message ${m.id}: ${e.message}`);
+        }
       }
-    } while (fetched.size >= 2); // loop until nearly empty
+
+      // nothing could be removed this round, stop instead of looping forever
+      if (deleted === 0) {
+        logger.warn(`purgeChannel: ${fetched.size} message(s) in channel ${channel.id} could not be deleted`);
+        return;
+      }
+    }
   } catch (e) {
     logger.error(`purgeChannel error: ${e.message}`);
   }

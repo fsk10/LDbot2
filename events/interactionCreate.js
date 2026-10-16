@@ -18,6 +18,7 @@ const { getHeldSeats, REGISTRATION_MAP_CAPTION } = require('../utils/seatHolds')
 const formatDisplayDate = require('../utils/dateUtils');
 const { getRegistrationSnapshot } = require('../utils/registrationData');
 const { getNameFromID } = require('../utils/getNameFromID');
+const { handleJobAutocomplete } = require('../commands/admin/adminannounce');
 const {
   buildReserveConfirmEmbed,
   buildReserveResultEmbed,
@@ -144,6 +145,8 @@ module.exports = {
         case 'adminannounce':
           if (focusedOptionName === 'event') {
             await handleEventAutocomplete(interaction);
+          } else if (focusedOptionName === 'job') {
+            await handleJobAutocomplete(interaction);
           }
           break;
 
