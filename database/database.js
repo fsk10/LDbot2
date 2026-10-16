@@ -22,20 +22,41 @@ const ADDED_COLUMNS = {
   events: {
     logchannel: { type: DataTypes.STRING, allowNull: true },
     announcechannel: { type: DataTypes.STRING, allowNull: true },
+    reminderauto: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+    reminderautosince: { type: DataTypes.DATE, allowNull: true },
+    reminderfirstday: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 7 },
+    remindersecondday: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 13 },
+    paymentdays: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 14 },
+  },
+  eventUsers: {
+    participantsince: { type: DataTypes.DATE, allowNull: true },
+    remindersent: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
   },
 };
 
 async function addMissingColumns() {
   const queryInterface = sequelize.getQueryInterface();
+  const added = [];
   for (const [table, columns] of Object.entries(ADDED_COLUMNS)) {
     const existing = await queryInterface.describeTable(table);
     for (const [column, definition] of Object.entries(columns)) {
       if (!existing[column]) {
         await queryInterface.addColumn(table, column, definition);
+        added.push(`${table}.${column}`);
         logger.info(`Database: added column ${table}.${column}.`);
       }
     }
   }
+  return added;
+}
+
+// One-time fill when participantsince is first added: existing participants
+// count from their signup (no reserve had been promoted when this shipped).
+async function backfillParticipantSince(added) {
+  if (!added.includes('eventUsers.participantsince')) return;
+  await sequelize.query('UPDATE eventUsers SET participantsince = createdAt WHERE reserve = 0 AND participantsince IS NULL');
+  const [[{ n }]] = await sequelize.query('SELECT COUNT(*) AS n FROM eventUsers WHERE participantsince IS NOT NULL');
+  logger.info(`Database: set participantsince from createdAt for ${n} participant(s).`);
 }
 
 // One seat can only belong to one user per event. Older databases may already
@@ -68,7 +89,7 @@ async function initializeDatabase() {
   try {
     const alter = false; // toggle for database ALTER logic on startup
     await sequelize.sync({ alter });
-    await addMissingColumns();
+    await backfillParticipantSince(await addMissingColumns());
     await ensureUniqueSeatIndex().catch(err => logger.warn(`Database: could not check unique seat index: ${err.message}`));
     logger.info(`Database initialized${alter ? ' (alter mode ON)' : ''}.`);
   } catch (err) {

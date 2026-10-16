@@ -20,6 +20,7 @@ const deployCommands = require('./deploy-commands');
 const cron = require('node-cron');
 const { releaseUnconfirmedSeats, autoCloseEndedEventRegistrations } = require('./database/operations');
 const { tickAnnounceJobs } = require('./scheduler/announcementsCron');
+const { tickPaymentReminders } = require('./scheduler/paymentReminders');
 const { updateCountdownChannel } = require('./utils/countdown');
 const crashGuard = require('./utils/crashGuard');
 
@@ -69,6 +70,7 @@ for (const file of eventFiles) {
 // Run every 10 minutes
 cron.schedule('*/10 * * * *', releaseUnconfirmedSeats);
 cron.schedule('*/10 * * * *', autoCloseEndedEventRegistrations);
+cron.schedule('*/10 * * * *', () => tickPaymentReminders(client));
 
 // Schedule the countdown update to run every hour
 cron.schedule('0 * * * *', () => {

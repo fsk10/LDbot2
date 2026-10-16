@@ -1,0 +1,13 @@
+{
+  "channelId": "715489429237792838",
+  "channel": {
+    "title": "💶 **Payment reminder: {event}**",
+    "line": "{mention}: last day to pay **{deadline}**",
+    "overdueLine": "{mention}: payment deadline **{deadline}** has passed",
+    "footer": "You haven't paid for your seat yet. The payment details are in the DM you got from the bot when you registered.\nAlready paid? Contact an event admin."
+  },
+  "dm": {
+    "text": "💶 **Payment reminder: {event}**\nWe haven't received your payment for seat {seat} yet.\nLast day to pay: **{deadline}**\nThe payment details are in the DM you got when you registered.\nAlready paid? Contact an event admin.",
+    "overdueText": "💶 **Payment reminder: {event}**\nYour payment deadline for seat {seat} (**{deadline}**) has passed.\nPlease contact an event admin as soon as possible."
+  }
+}

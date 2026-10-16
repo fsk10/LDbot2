@@ -47,6 +47,18 @@ module.exports = (sequelize) => {
         allowNull: false,
         defaultValue: false,
       },
+      // When the user last became a participant (not reserve); the payment
+      // deadline counts from here. Null while on the reserve list.
+      participantsince: {
+        type: DataTypes.DATE,
+        allowNull: true,
+      },
+      // Automatic payment reminders sent in the current participant period (0-2)
+      remindersent: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0,
+      },
     },
     {
       sequelize,
@@ -60,6 +72,21 @@ module.exports = (sequelize) => {
       ],
     }
   );
+
+  // Keep participantsince in step with the reserve flag on every create/update,
+  // whichever command or flow changes it. Static Model.update() skips these
+  // hooks, so eventUsers rows must be updated through instances.
+  function trackParticipantSince(row) {
+    if (row.reserve) {
+      row.participantsince = null;
+      row.remindersent = 0;
+    } else if (row.isNewRecord || row.changed('reserve') || !row.participantsince) {
+      row.participantsince = new Date();
+      row.remindersent = 0;
+    }
+  }
+  EventUsers.addHook('beforeCreate', trackParticipantSince);
+  EventUsers.addHook('beforeUpdate', trackParticipantSince);
 
   return EventUsers;
 };

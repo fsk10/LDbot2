@@ -134,6 +134,10 @@ const EVENT_LABELS = {
   regopen: 'Registration Status',
   logchannel: 'Log Channel',
   announcechannel: 'Announce Channel',
+  reminderauto: 'Automatic Payment Reminders',
+  reminderfirstday: 'First Reminder (days after signup)',
+  remindersecondday: 'Second Reminder (days after signup)',
+  paymentdays: 'Days To Pay',
 };
 
 function formatEventFieldValue(key, value) {
@@ -164,6 +168,10 @@ function formatEventFieldValue(key, value) {
 
   if (key === 'regopen') {
     return value ? 'Open' : 'Closed';
+  }
+
+  if (key === 'reminderauto') {
+    return value ? 'On' : 'Off';
   }
 
   return formatValue(value);

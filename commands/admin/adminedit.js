@@ -11,6 +11,7 @@ const { isAdmin } = require('../../utils/permissions');
 const logger = require('../../utils/logger');
 const { formatEventUserLog, formatEventUserDiffLog, bullet, bulletEventField, formatEventUpdateLog } = require('../../utils/activityFormat');
 const { parseLocalToUTC } = require('../../utils/dateUtils');
+const { validateReminderDays } = require('../../utils/paymentReminders');
 
 const commandData = new SlashCommandBuilder()
   .setName('adminedit')
@@ -35,6 +36,10 @@ const commandData = new SlashCommandBuilder()
         { name: 'Announce channel (turn off)', value: 'announcechannel' }
       ))
       .addBooleanOption(option => option.setName('regopen').setDescription('Allow public registration?'))
+      .addBooleanOption(option => option.setName('reminderauto').setDescription('Send automatic payment reminders by DM?'))
+      .addIntegerOption(option => option.setName('reminderfirstday').setDescription('First payment reminder, days after signup (default 7)').setMinValue(1).setMaxValue(365))
+      .addIntegerOption(option => option.setName('remindersecondday').setDescription('Second payment reminder, days after signup (default 13)').setMinValue(1).setMaxValue(365))
+      .addIntegerOption(option => option.setName('paymentdays').setDescription('Days to pay after signup (default 14)').setMinValue(1).setMaxValue(365))
   )
   .addSubcommand(subcommand =>
     subcommand.setName('user')
@@ -85,7 +90,7 @@ async function execute(interaction, client) {
 
       // Build the patch (exclude adminrole here; we normalize it separately)
       let updatedFields = {};
-      for (let field of ['name', 'location', 'startdate', 'enddate', 'seatsavailable', 'entryfee', 'participantchannel', 'paymentconfig','regopen', 'logchannel', 'announcechannel']) {
+      for (let field of ['name', 'location', 'startdate', 'enddate', 'seatsavailable', 'entryfee', 'participantchannel', 'paymentconfig','regopen', 'logchannel', 'announcechannel', 'reminderauto', 'reminderfirstday', 'remindersecondday', 'paymentdays']) {
         const optionValue = interaction.options.get(field)?.value;
         if (optionValue !== undefined) updatedFields[field] = optionValue;
       }
@@ -153,10 +158,25 @@ async function execute(interaction, client) {
         }
       }
 
+      // ---- Payment reminders ----
+      if (['reminderfirstday', 'remindersecondday', 'paymentdays'].some(f => updatedFields[f] !== undefined)) {
+        const error = validateReminderDays({
+          first: updatedFields.reminderfirstday ?? originalEvent.reminderfirstday,
+          second: updatedFields.remindersecondday ?? originalEvent.remindersecondday,
+          payment: updatedFields.paymentdays ?? originalEvent.paymentdays,
+        });
+        if (error) return interaction.editReply(`❌ ${error} Nothing was changed.`);
+      }
+      const logFields = { ...updatedFields };
+      // Switching on only covers reminders from now on
+      if (updatedFields.reminderauto === true && !originalEvent.reminderauto) {
+        updatedFields.reminderautosince = new Date();
+      }
+
       const result = await updateEvent(eventName, updatedFields, client);
       if (result.success) {
         // Pretty labels & values: Payment Config → “Sweden”, Event Adminrole → @Role, etc.
-        const logText = formatEventUpdateLog(interaction.user.tag, originalEvent.name, updatedFields);
+        const logText = formatEventUpdateLog(interaction.user.tag, originalEvent.name, logFields);
         logActivity(client, logText, { eventId: originalEvent.id });
         return interaction.editReply('✅ Saved.');
       } else {

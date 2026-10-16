@@ -62,6 +62,31 @@ module.exports = (sequelize) => {
       type: DataTypes.STRING,
       allowNull: true,
     },
+    // Payment reminders (see scheduler/paymentReminders.js)
+    reminderauto: {
+      type: DataTypes.BOOLEAN,
+      allowNull: false,
+      defaultValue: false,
+    },
+    reminderautosince: {
+      type: DataTypes.DATE,
+      allowNull: true,
+    },
+    reminderfirstday: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 7,
+    },
+    remindersecondday: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 13,
+    },
+    paymentdays: {
+      type: DataTypes.INTEGER,
+      allowNull: false,
+      defaultValue: 14,
+    },
     // ... add other fields as needed
   }, 
   {

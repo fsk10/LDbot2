@@ -37,6 +37,9 @@ todo.txt
 config/paymentConfig_Belgium.json
 config/paymentConfig_Sweden.json
 
+# Payment reminder texts + channel (own copy per server, see reminderConfig.example.json)
+config/reminderConfig.json
+
 # Generated seating charts
 charts/
 

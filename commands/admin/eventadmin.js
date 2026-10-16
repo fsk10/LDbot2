@@ -1,6 +1,6 @@
 // commands/admin/eventadmin.js
 const { SlashCommandBuilder } = require('@discordjs/builders');
-const { EmbedBuilder } = require('discord.js');
+const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { Op } = require('sequelize');
 const { isEventAdminForEvent } = require('../../utils/permissions');
 const { UserModel, EventModel, EventUsersModel } = require('../../models');
@@ -11,6 +11,13 @@ const logger = require('../../utils/logger');
 const { formatEventUserLog, formatEventUserDiffLog, formatEventUpdateLog } = require('../../utils/activityFormat');
 const { listUsers } = require('../../database/operations');
 const { getNameFromID } = require('../../utils/getNameFromID');
+const { getReminderConfig } = require('../../utils/reminderConfig');
+const {
+  ReminderError, validateReminderDays, getUnpaidParticipants, getReminderChannel,
+  sendReminderDms, postChannelReminder, nickOf, nameList,
+} = require('../../utils/paymentReminders');
+
+const CONFIRM_TIMEOUT_MS = 60 * 1000;
 
 const data = new SlashCommandBuilder()
   .setName('eventadmin')
@@ -66,7 +73,27 @@ const data = new SlashCommandBuilder()
     .setName('regopen')
     .setDescription('Open or close registration for your event')
     .addStringOption(o => o.setName('event').setDescription('Event').setRequired(true).setAutocomplete(true))
-    .addBooleanOption(o => o.setName('open').setDescription('Set registration open? (true=open, false=closed)').setRequired(true)));
+    .addBooleanOption(o => o.setName('open').setDescription('Set registration open? (true=open, false=closed)').setRequired(true)))
+  // payment reminders
+  .addSubcommandGroup(g => g
+    .setName('reminder')
+    .setDescription('Payment reminders for unpaid participants')
+    .addSubcommand(sc => sc
+      .setName('send')
+      .setDescription('Remind unpaid participants now (shows a preview first)')
+      .addStringOption(o => o.setName('event').setDescription('Event').setRequired(true).setAutocomplete(true))
+      .addStringOption(o => o.setName('via').setDescription('How to remind them').setRequired(true).addChoices(
+        { name: 'DM to each unpaid participant', value: 'dm' },
+        { name: 'Tag them in the reminder channel', value: 'channel' }
+      )))
+    .addSubcommand(sc => sc
+      .setName('settings')
+      .setDescription('Show or change automatic payment reminders for your event')
+      .addStringOption(o => o.setName('event').setDescription('Event').setRequired(true).setAutocomplete(true))
+      .addBooleanOption(o => o.setName('auto').setDescription('Send automatic reminders by DM?'))
+      .addIntegerOption(o => o.setName('first_day').setDescription('First reminder, days after signup (default 7)').setMinValue(1).setMaxValue(365))
+      .addIntegerOption(o => o.setName('second_day').setDescription('Second reminder, days after signup (default 13)').setMinValue(1).setMaxValue(365))
+      .addIntegerOption(o => o.setName('payment_days').setDescription('Days to pay after signup (default 14)').setMinValue(1).setMaxValue(365))));
 
 async function splitEmbeds(users, eventName, interaction, outputType = 'short') {
   const MAX_SIZE = 4096;
@@ -142,6 +169,135 @@ async function splitEmbeds(users, eventName, interaction, outputType = 'short') 
   return embeds;
 }
 
+function reminderSettingsText(event) {
+  const cfg = getReminderConfig();
+  return [
+    `**Payment reminders for ${event.name}**`,
+    `:white_small_square: **Automatic reminders by DM**: ${event.reminderauto ? 'On' : 'Off'}`,
+    `:white_small_square: **First reminder**: day ${event.reminderfirstday} after signup, 12:00`,
+    `:white_small_square: **Second reminder**: day ${event.remindersecondday} after signup, 12:00`,
+    `:white_small_square: **Last day to pay**: day ${event.paymentdays} after signup`,
+    `:white_small_square: **Reminder channel**: ${cfg ? `<#${cfg.channelId}>` : 'not configured'}`,
+  ].join('\n');
+}
+
+// Preview + [Send]/[Cancel]. Resolves true on Send; on Cancel or timeout the
+// reply says nothing was sent and it resolves false.
+async function confirmReminder(interaction, content) {
+  const sendId = `reminder_send:${interaction.id}`;
+  const cancelId = `reminder_cancel:${interaction.id}`;
+  const message = await interaction.editReply({
+    content,
+    components: [new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(sendId).setLabel('Send').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(cancelId).setLabel('Cancel').setStyle(ButtonStyle.Secondary)
+    )]
+  });
+
+  let click;
+  try {
+    click = await message.awaitMessageComponent({
+      filter: i => i.user.id === interaction.user.id && (i.customId === sendId || i.customId === cancelId),
+      time: CONFIRM_TIMEOUT_MS
+    });
+  } catch {
+    await interaction.editReply({ content: '⏱️ No answer, nothing was sent.', components: [] }).catch(() => {});
+    return false;
+  }
+  if (click.customId === cancelId) {
+    await click.update({ content: 'Cancelled, nothing was sent.', components: [] }).catch(() => {});
+    return false;
+  }
+  await click.update({ content: 'Sending reminders…', components: [] }).catch(() => {});
+  return true;
+}
+
+async function handleReminderSend(interaction, client, event) {
+  const via = interaction.options.getString('via', true);
+  if (!getReminderConfig()) {
+    return interaction.editReply('❌ Payment reminders are not configured on this bot. Nothing was sent.');
+  }
+
+  let channel = null;
+  try {
+    if (via === 'channel') channel = await getReminderChannel(client);
+  } catch (e) {
+    if (e instanceof ReminderError) return interaction.editReply(`❌ ${e.message} Nothing was sent.`);
+    throw e;
+  }
+
+  const preview = await getUnpaidParticipants(event.id);
+  if (!preview.length) {
+    return interaction.editReply(`✅ Everyone in **${event.name}** has paid. No reminder needed.`);
+  }
+
+  const target = via === 'dm' ? 'by DM' : `in <#${channel.id}>`;
+  const ok = await confirmReminder(interaction,
+    `Remind **${preview.length}** unpaid participant(s) of **${event.name}** ${target}?\n${nameList(preview.map(nickOf))}`);
+  if (!ok) return;
+
+  // Re-read: someone may have paid while the preview was open
+  const rows = await getUnpaidParticipants(event.id);
+  if (!rows.length) {
+    return interaction.editReply({ content: `✅ Everyone in **${event.name}** has paid now. Nothing was sent.`, components: [] });
+  }
+
+  if (via === 'dm') {
+    const { sent, failed } = await sendReminderDms(client, event, rows);
+    let log = `💶 Payment reminder for **${event.name}** sent by DM by [ **${interaction.user.tag}** ] to **${sent.length}** user(s)`;
+    if (sent.length) log += `: ${nameList(sent)}`;
+    if (failed.length) log += `\n:white_small_square: Could not reach (DMs closed or left the server): ${nameList(failed, 300)}`;
+    logActivity(client, log, { eventId: event.id });
+
+    let reply = `✅ Sent a payment reminder by DM to **${sent.length}** user(s).`;
+    if (failed.length) reply += `\n⚠️ Could not reach: ${nameList(failed)}`;
+    return interaction.editReply({ content: reply, components: [] });
+  }
+
+  try {
+    await postChannelReminder(client, event, rows);
+  } catch (e) {
+    if (e instanceof ReminderError) return interaction.editReply({ content: `❌ ${e.message} Nothing was sent.`, components: [] });
+    throw e;
+  }
+  logActivity(client,
+    `💶 Payment reminder for **${event.name}** posted in <#${channel.id}> by [ **${interaction.user.tag}** ], **${rows.length}** user(s) tagged: ${nameList(rows.map(nickOf))}`,
+    { eventId: event.id });
+  return interaction.editReply({ content: `✅ Posted a payment reminder in <#${channel.id}> tagging **${rows.length}** user(s).`, components: [] });
+}
+
+async function handleReminderSettings(interaction, client, event) {
+  const auto = interaction.options.getBoolean('auto');
+  const first = interaction.options.getInteger('first_day');
+  const second = interaction.options.getInteger('second_day');
+  const payment = interaction.options.getInteger('payment_days');
+
+  if (auto === null && first === null && second === null && payment === null) {
+    return interaction.editReply(reminderSettingsText(event));
+  }
+
+  const error = validateReminderDays({
+    first: first ?? event.reminderfirstday,
+    second: second ?? event.remindersecondday,
+    payment: payment ?? event.paymentdays,
+  });
+  if (error) return interaction.editReply(`❌ ${error} Nothing was changed.`);
+
+  const changes = {};
+  if (auto !== null && auto !== event.reminderauto) changes.reminderauto = auto;
+  if (first !== null && first !== event.reminderfirstday) changes.reminderfirstday = first;
+  if (second !== null && second !== event.remindersecondday) changes.remindersecondday = second;
+  if (payment !== null && payment !== event.paymentdays) changes.paymentdays = payment;
+  if (!Object.keys(changes).length) {
+    return interaction.editReply(`No changes.\n${reminderSettingsText(event)}`);
+  }
+
+  // Switching on only covers reminders from now on
+  await event.update(changes.reminderauto ? { ...changes, reminderautosince: new Date() } : changes);
+  logActivity(client, formatEventUpdateLog(interaction.user.tag, event.name, changes), { eventId: event.id });
+  return interaction.editReply(`✅ Saved.\n${reminderSettingsText(event)}`);
+}
+
 async function execute(interaction, client) {
   const sub = interaction.options.getSubcommand(true);
   const eventIdStr = interaction.options.getString('event', true);
@@ -177,6 +333,11 @@ async function execute(interaction, client) {
 
     if (eventEnded) {
       return interaction.editReply(`❌ **${event.name}** has ended. No further changes can be made via this command.`);
+    }
+
+    if (interaction.options.getSubcommandGroup(false) === 'reminder') {
+      if (sub === 'send') return await handleReminderSend(interaction, client, event);
+      if (sub === 'settings') return await handleReminderSettings(interaction, client, event);
     }
 
     if (sub === 'regopen') {

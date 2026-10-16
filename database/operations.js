@@ -215,11 +215,10 @@ async function updateEventUser(eventId, userId, updatedFields, client) {
       updatedFields.paidAt = updatedFields.haspaid ? new Date() : null;
     }
 
-    const [affected] = await EventUsersModel.update(updatedFields, {
-      where: { eventId, userId }
-    });
-
-    if (affected > 0) {
+    // Update through the instance so the model hooks (participantsince) run
+    const row = await EventUsersModel.findOne({ where: { eventId, userId } });
+    if (row) {
+      await row.update(updatedFields);
       // Any change to seat/haspaid/reserve should refresh the participant channel.
       // Use the debounced updater to coalesce rapid edits into one render.
       scheduleParticipantListUpdate(client, eventId);
