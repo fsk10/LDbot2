@@ -114,12 +114,21 @@ async function executeSend(interaction) {
   if (!atUTCdate || atUTCdate.getTime() <= Date.now()) {
     await interaction.deferReply({ ephemeral: true });
 
-    await runAnnouncementNow(interaction.client, {
-      eventId: event.id,
-      channelId: targetChan.id,
-      openOnPost,
-      actorTag: interaction.user.tag
-    });
+    try {
+      await runAnnouncementNow(interaction.client, {
+        eventId: event.id,
+        channelId: targetChan.id,
+        openOnPost,
+        actorTag: interaction.user.tag
+      });
+    } catch (e) {
+      if (!e.announceReason) throw e;
+      logger.warn(`adminannounce send: post to channel ${targetChan.id} failed: ${e.message}`);
+      return interaction.editReply(
+        `❌ Could not post the announcement in ${targetChan}: ${e.announceReason}.` +
+        (e.regOpened ? '\nRegistration **was opened** before the post failed.' : '')
+      );
+    }
 
     return interaction.editReply(`✅ Announced **${event.name}** in ${targetChan}.`);
   }

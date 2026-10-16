@@ -6,7 +6,7 @@ const logger = require('../utils/logger');
 const logActivity = require('../utils/logActivity');
 const { withEventLock } = require('../utils/eventLock');
 const { formatDisplayDate } = require('../utils/dateUtils');
-const { postAnnouncementForJob } = require('../utils/announcements');
+const { postAnnouncementForJob, failureReason } = require('../utils/announcements');
 const SETTINGS_KEY = 'announce_jobs';
 const LOCK_KEY = 'announce-jobs';
 const GRACE_MIN = 2; // minutes of LATE tolerance (never early); later than this counts as missed
@@ -102,16 +102,6 @@ async function reportMissedJob(client, job, due) {
   }
   msg += '\nPost it manually with **/adminannounce send** if it is still needed.';
   logActivity(client, msg, { eventId: event ? event.id : undefined });
-}
-
-// Readable reason for the admin log; full error stays in the bot log.
-function failureReason(err) {
-  switch (err?.code) {
-    case 50001: return 'the bot has no access to the channel';
-    case 50013: return 'the bot is missing permissions in the channel';
-    case 10003: return 'the channel no longer exists';
-    default: return 'see the bot log for details';
-  }
 }
 
 // The scheduler tried to post but couldn't; tell the admins in the log channel.
