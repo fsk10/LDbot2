@@ -25,4 +25,5 @@ module.exports = [
     { name: 'Sweden', value: 'SE' },
     { name: 'Switzerland', value: 'CH' },
     { name: 'United Kingdom', value: 'GB' },
+    { name: 'United States', value: 'US' },
 ];
