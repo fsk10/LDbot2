@@ -689,7 +689,8 @@ module.exports = {
           return;
         }
 
-        if (customId === 'cancel_unregistration') {
+        // /unregister's No button carries the event name: cancel_unregistration-<event>
+        if (customId.startsWith('cancel_unregistration-')) {
             await interaction.update({ embeds: [buildRegistrationStillActiveEmbed()], components: [] });
             return;
         }
