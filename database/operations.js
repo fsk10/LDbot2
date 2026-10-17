@@ -181,8 +181,8 @@ async function updateUser(nickname, updatedFields, client) {
     const result = await UserModel.update(updatedFields, { where: { id: user.id } });
 
     if (result[0] > 0) {
-      // If the nickname was changed, update the participant list for all events the user is part of
-      if ('nickname' in updatedFields) {
+      // Nickname and country are shown in the participant list: refresh it for all the user's events
+      if ('nickname' in updatedFields || 'country' in updatedFields) {
         const userEvents = await EventUsersModel.findAll({ where: { userId: user.id } });
         for (const userEvent of userEvents) {
           await updateParticipantList(client, userEvent.eventId);
