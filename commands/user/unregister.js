@@ -1,8 +1,8 @@
 const { SlashCommandBuilder } = require('@discordjs/builders');
-const { EmbedBuilder, ActionRowBuilder, ButtonBuilder } = require('discord.js');
 const { EventModel, UserModel, EventUsersModel } = require('../../models');
 const logger = require('../../utils/logger');
 const logActivity = require('../../utils/logActivity');
+const { buildUnregisterConfirm } = require('../../utils/embeds');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -47,25 +47,7 @@ module.exports = {
                 return interaction.reply({ content: `You are not registered for the event "${eventName}".`, ephemeral: true });
             }
 
-            const confirmCustomId = `confirm_unregistration-${eventName}`;
-            const cancelCustomId = `cancel_unregistration-${eventName}`;
-
-            const row = new ActionRowBuilder()
-                .addComponents(
-                    new ButtonBuilder()
-                        .setCustomId(confirmCustomId)
-                        .setLabel('Yes')
-                        .setStyle('4'),
-                    new ButtonBuilder()
-                        .setCustomId(cancelCustomId)
-                        .setLabel('No')
-                        .setStyle('2')
-                );
-
-            const embed = new EmbedBuilder()
-            .setTitle("Unregister Confirmation")
-            .setDescription(`Are you sure you want to remove your registration for\n **${eventName}** \n`)
-            .setColor("#FFA500");
+            const { embed, row } = buildUnregisterConfirm(eventName);
 
         await interaction.reply({
             embeds: [embed],

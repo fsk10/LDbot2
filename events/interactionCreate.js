@@ -36,6 +36,7 @@ const {
   buildRegistrationStillActiveEmbed,
   buildCurrentRegistrationEmbed,
   buildManageRegistrationButtons,
+  buildUnregisterConfirm,
   buildEditChoiceEmbed,
   buildEditChoiceButtons,
   buildAlreadyRegisteredNotice,
@@ -258,7 +259,7 @@ module.exports = {
                 seat: existing.seat || null,
                 isReserve: !!existing.reserve,
                 });
-                const dmButtons = buildManageRegistrationButtons();
+                const dmButtons = buildManageRegistrationButtons(event.id);
 
                 await interaction.user.send({ embeds: [dmEmbed], components: [dmButtons] });
 
@@ -386,6 +387,10 @@ module.exports = {
 
           await userRegistration.destroy();
           await scheduleParticipantListUpdate(interaction.client, event.id);
+          // An open "manage registration" session for this event is now pointless
+          if (ongoingRegistration && ongoingRegistration.eventId === event.id) {
+            await TemporaryRegistration.destroy({ where: { discorduser: userId } });
+          }
 
           await interaction.update({ embeds: [buildRegistrationRemovedEmbed()], components: [] });
 
@@ -393,6 +398,31 @@ module.exports = {
           announceRegistration(interaction.client, event.id, user.nickname, 'left');
         } catch (error) {
           await interaction.update({ content: 'An error occurred while processing your request.', ephemeral: true, components: [] });
+        }
+        return;
+      }
+
+      // Unregister button on the DM "Current Event Registration" card: ask first,
+      // the Yes/No buttons are the same as /unregister's
+      if (customId.startsWith('reg_unregister-')) {
+        const eventId = parseInt(customId.substring('reg_unregister-'.length), 10);
+        try {
+          const user = await UserModel.findOne({ where: { discorduser: userId } });
+          const event = Number.isInteger(eventId) ? await EventModel.findByPk(eventId) : null;
+          const userRegistration = event && user
+            ? await EventUsersModel.findOne({ where: { userId: user.id, eventId: event.id } })
+            : null;
+
+          if (!userRegistration) {
+            const emb = buildRegistrationFailedEmbed('You are no longer registered for this event.');
+            return interaction.update({ embeds: [emb], components: [] });
+          }
+
+          const { embed, row } = buildUnregisterConfirm(event.name);
+          await interaction.update({ embeds: [embed], components: [row] });
+        } catch (error) {
+          logger.error(`reg_unregister failed for ${userId}: ${error.message}`);
+          await interaction.update({ embeds: [buildRegistrationFailedEmbed()], components: [] }).catch(() => {});
         }
         return;
       }
@@ -493,7 +523,7 @@ module.exports = {
                     seat,
                     isReserve,
                 });
-                const dmButtons = buildManageRegistrationButtons();
+                const dmButtons = buildManageRegistrationButtons(event.id);
 
                 try {
                     await interaction.user.send({ embeds: [dmEmbed], components: [dmButtons] });

@@ -106,12 +106,32 @@ function buildAccountDetailsConfirmEmbed({ eventName, snap, discordUsername }) {
     );
 }
 
+// Unicode flag for a two-letter country code (renders in embed titles too), '' otherwise
+function countryFlag(code) {
+  if (!/^[A-Za-z]{2}$/.test(code || '')) return '';
+  return String.fromCodePoint(...[...code.toUpperCase()].map(c => 0x1F1E6 + c.charCodeAt(0) - 65));
+}
+
 // ---------- Buttons for the current-registration card ----------
-function buildManageRegistrationButtons() {
+function buildManageRegistrationButtons(eventId) {
   return new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId('reg_nochanges').setLabel('No Changes').setStyle(3),
     new ButtonBuilder().setCustomId('reg_edit').setLabel('Edit Registration').setStyle(1),
+    new ButtonBuilder().setCustomId(`reg_unregister-${eventId}`).setLabel('Unregister').setStyle(4),
   );
+}
+
+// Yes/No confirmation shared by /unregister and the card's Unregister button
+function buildUnregisterConfirm(eventName) {
+  const embed = new EmbedBuilder()
+    .setTitle('Unregister Confirmation')
+    .setDescription(`Are you sure you want to remove your registration for\n **${eventName}** \n`)
+    .setColor('#FFA500');
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`confirm_unregistration-${eventName}`).setLabel('Yes').setStyle(4),
+    new ButtonBuilder().setCustomId(`cancel_unregistration-${eventName}`).setLabel('No').setStyle(2),
+  );
+  return { embed, row };
 }
 
 // ---------- Seat selection ----------
@@ -244,6 +264,8 @@ module.exports = {
   buildCheckDMsEmbed,
   buildCurrentRegistrationEmbed,
   buildManageRegistrationButtons,
+  buildUnregisterConfirm,
+  countryFlag,
   buildEditChoiceEmbed,
   buildEditChoiceButtons,
   buildNoChangesUpdateEmbed,

@@ -85,7 +85,7 @@ module.exports = {
                 seat: existing?.seat || null,
                 isReserve: !!existing?.reserve,
             });
-            const dmButtons = buildManageRegistrationButtons();
+            const dmButtons = buildManageRegistrationButtons(eventId);
 
             try {
                 await interaction.user.send({ embeds: [dmEmbed], components: [dmButtons] });

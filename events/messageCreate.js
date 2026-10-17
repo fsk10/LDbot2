@@ -7,7 +7,7 @@ const countries = require('../config/countryList');
 const { assignSeat, isNicknameAvailable } = require('../database/operations.js');
 const { loadChartById } = require('../utils/seating');
 const logger = require('../utils/logger');
-const { flagOrDash, buildAccountDetailsConfirmEmbed } = require('../utils/embeds');
+const { flagOrDash, countryFlag, buildAccountDetailsConfirmEmbed } = require('../utils/embeds');
 const { getRegistrationSnapshot } = require('../utils/registrationData');
 const { withEventLock } = require('../utils/eventLock');
 const { getHeldSeats, SEAT_HOLD_MINUTES } = require('../utils/seatHolds');
@@ -166,7 +166,7 @@ module.exports = {
                                 );
 
                                 const regCountryConfirmEmbed = new EmbedBuilder()
-                                    .setTitle(`You've selected __${country.name}__. Is this correct?`)
+                                    .setTitle(`You've selected ${[countryFlag(country.value), `__${country.name}__`].filter(Boolean).join(' ')}. Is this correct?`)
                                     .setColor('#0089E4');
                                 
                                 await message.author.send({ 
