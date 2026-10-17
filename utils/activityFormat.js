@@ -107,16 +107,6 @@ function formatChartSetLog(actorTag, { eventName, eventId, chartId }) {
   return lines.join('\n');
 }
 
-/** Optional generic helpers for other commands later */
-function formatSimpleAction(actorTag, title, fields = []) {
-  const header = `${title} by [ **${actorTag}** ]`;
-  const lines = [
-    header,
-    ...fields.map(([label, value]) => bullet(label, value))
-  ].filter(Boolean);
-  return lines.join('\n');
-}
-
 /* ------------------------------------------------------------------ */
 /* Pretty labels/values for event update logging                      */
 /* ------------------------------------------------------------------ */
@@ -197,7 +187,6 @@ module.exports = {
   formatEventUserDiffLog,
   formatChartImportLog,
   formatChartSetLog,
-  formatSimpleAction,
   bulletEventField,
   formatEventUpdateLog,
 };

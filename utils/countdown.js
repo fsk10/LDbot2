@@ -109,7 +109,10 @@ async function scheduleCountdownUpdate(client) {
 
   if (timeoutHandler) clearTimeout(timeoutHandler);
   timeoutHandler = setTimeout(() => {
-    updateCountdownChannel(client).then(() => scheduleCountdownUpdate(client));
+    // Always reschedule, also after an error: this timer is the only thing driving the countdown
+    updateCountdownChannel(client)
+      .catch(err => logger.error(`Error updating countdown channel: ${err.message}`))
+      .finally(() => scheduleCountdownUpdate(client).catch(err => logger.error(`Error scheduling countdown update: ${err.message}`)));
   }, delayUntilNextUpdate);
 
   logger.info(`Next countdown update scheduled in ${delayUntilNextUpdate} milliseconds.`);

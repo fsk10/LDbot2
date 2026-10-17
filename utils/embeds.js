@@ -106,13 +106,6 @@ function buildAccountDetailsConfirmEmbed({ eventName, snap, discordUsername }) {
     );
 }
 
-function buildAccountUpdatedEmbed(eventName) {
-  return new EmbedBuilder()
-    .setTitle('Account Updated')
-    .setDescription(`Your account details for **${eventName}** have been updated.`)
-    .setColor('#28B81C');
-}
-
 // ---------- Buttons for the current-registration card ----------
 function buildManageRegistrationButtons() {
   return new ActionRowBuilder().addComponents(
@@ -258,5 +251,4 @@ module.exports = {
   buildRegistrationRemovedEmbed, 
   buildRegistrationStillActiveEmbed,
   buildAccountDetailsConfirmEmbed,
-  buildAccountUpdatedEmbed,
 };

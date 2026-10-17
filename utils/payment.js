@@ -112,7 +112,6 @@ module.exports = {
   reloadPaymentConfig,
   listPaymentConfigFiles,
   getPaymentConfigForEvent,
-  loadPaymentConfigForEvent: getPaymentConfigForEvent,
   get paymentConfig() {
     return paymentConfig;
   },

@@ -313,47 +313,6 @@ async function deleteUserCompletely(nickname, client) {
   }
 }
 
-/* -------------------- Misc associations & moves -------------------- */
-
-async function associateUserToEvent(userId, eventId) {
-  try {
-    await EventUsersModel.create({ userId, eventId });
-    return { success: true };
-  } catch (error) {
-    logger.error(`Error associating userId ${userId} to eventId ${eventId}:`, error);
-    return { success: false, error: error.message || 'Validation error' };
-  }
-}
-
-async function moveUserFromReserve(userId, eventId) {
-  try {
-    const row = await EventUsersModel.findOne({ where: { userId, eventId } });
-    if (!row) return { success: false, error: "User not found in the event" };
-    if (!row.reserve) return { success: false, error: "User is not in the reserve list" };
-
-    // Get the first available seat among main list
-    const occupiedSeats = (await EventUsersModel.findAll({
-      where: { eventId, reserve: false, seat: { [Op.ne]: null } },
-      attributes: ['seat'],
-      order: [['seat', 'ASC']]
-    })).map(s => s.seat);
-
-    let seatToAssign = 1;
-    for (const taken of occupiedSeats) {
-      if (taken === seatToAssign) seatToAssign++;
-      else break;
-    }
-
-    row.seat = seatToAssign;
-    row.reserve = false;
-    await row.save();
-
-    return { success: true };
-  } catch (error) {
-    return { success: false, error: error.message };
-  }
-}
-
 /* -------------------- Settings -------------------- */
 
 async function getSetting(key) {
@@ -578,8 +537,6 @@ async function assignSeat(userId, eventId, preferredSeats) {
   return null;
 }
 
-const UNCONFIRMED_SEAT_EXPIRY_MS = 10 * 60 * 1000; // 10 minutes
-
 async function autoCloseEndedEventRegistrations() {
   try {
     const now = new Date();
@@ -591,21 +548,6 @@ async function autoCloseEndedEventRegistrations() {
   } catch (error) {
     logger.error('Error in autoCloseEndedEventRegistrations:', error);
   }
-}
-
-async function releaseUnconfirmedSeats() {
-  const expiryTime = UNCONFIRMED_SEAT_EXPIRY_MS;
-  const expiredTimestamp = new Date(Date.now() - expiryTime);
-
-  await EventUsersModel.update(
-    { status: 'available' },
-    {
-      where: {
-        status: 'reserved',
-        updatedAt: { [Op.lte]: expiredTimestamp }
-      }
-    }
-  );
 }
 
 /* -------------------- Seating map / channel updates -------------------- */
@@ -651,10 +593,6 @@ async function generateCurrentSeatingMap(eventID, { includeHolds = false } = {})
     (config.seating?.overlay?.occupied) || 'rgba(230,20,20,0.5)'
   );
   return pngBuffer;
-}
-
-function truncateNickname(nickname) {
-  return nickname.length > 12 ? nickname.substring(0, 10) + '..' : nickname;
 }
 
 const UNKNOWN_MESSAGE = 10008; // Discord: message already deleted
@@ -704,29 +642,6 @@ async function purgeChannel(channel) {
     }
   } catch (e) {
     logger.error(`purgeChannel error: ${e.message}`);
-  }
-}
-
-async function createEventEmbed(eventId) {
-  try {
-    const event = await EventModel.findByPk(eventId, {
-      include: [{
-        model: UserModel,
-        as: 'users',
-        through: { where: { haspaid: true } },
-        required: false
-      }]
-    });
-
-    const embed = new EmbedBuilder()
-      .setTitle(`Participants for ${event.name}`)
-      .setColor('#0089E4')
-      .setDescription(event.users.map(user => user.nickname).join('\n'));
-
-    return embed;
-  } catch (error) {
-    logger.error(`Error creating embed for eventId ${eventId}:`, error);
-    return null;
   }
 }
 
@@ -1001,8 +916,6 @@ module.exports = {
   getEvent,
   checkSeatTaken,
   checkUserInEvent,
-  associateUserToEvent,
-  moveUserFromReserve,
   deleteEvent,
   deleteUserFromEvent,
   deleteUserCompletely,
@@ -1011,13 +924,10 @@ module.exports = {
   updateEventUser,
   assignSeat,
   autoCloseEndedEventRegistrations,
-  releaseUnconfirmedSeats,
   fetchOccupiedSeatsForEvent,
   getAvailableSeatsForEvent,
   generateCurrentSeatingMap,
-  truncateNickname,
   updateParticipantList,
-  createEventEmbed,
   getReserveUsersForEvent,
   createReserveListEmbed,
   isNicknameAvailable,

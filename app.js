@@ -18,10 +18,9 @@ require('./models');
 const { initializeDatabase } = require('./database/database');
 const deployCommands = require('./deploy-commands');
 const cron = require('node-cron');
-const { releaseUnconfirmedSeats, autoCloseEndedEventRegistrations } = require('./database/operations');
+const { autoCloseEndedEventRegistrations } = require('./database/operations');
 const { tickAnnounceJobs } = require('./scheduler/announcementsCron');
 const { tickPaymentReminders } = require('./scheduler/paymentReminders');
-const { updateCountdownChannel } = require('./utils/countdown');
 const crashGuard = require('./utils/crashGuard');
 
 const client = new Client({
@@ -68,14 +67,8 @@ for (const file of eventFiles) {
 }
 
 // Run every 10 minutes
-cron.schedule('*/10 * * * *', releaseUnconfirmedSeats);
 cron.schedule('*/10 * * * *', autoCloseEndedEventRegistrations);
 cron.schedule('*/10 * * * *', () => tickPaymentReminders(client));
-
-// Schedule the countdown update to run every hour
-cron.schedule('0 * * * *', () => {
-    updateCountdownChannel(client).catch(err => logger.error(`Error updating countdown channel: ${err.message}`));
-});
 
 // Run the announcement scheduler every minute
 cron.schedule('* * * * *', () => {
