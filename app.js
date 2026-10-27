@@ -12,7 +12,7 @@ global.ongoingRegistrations = {};
 const fs = require('node:fs');
 const path = require('node:path');
 const logger = require('./utils/logger');
-const { Client, Collection, Events, GatewayIntentBits } = require('discord.js');
+const { Client, Collection, Events, GatewayIntentBits, Partials } = require('discord.js');
 const { BOT_TOKEN } = require('./config.json');
 require('./models');
 const { initializeDatabase } = require('./database/database');
@@ -31,6 +31,9 @@ const client = new Client({
     GatewayIntentBits.GuildMembers,
 	GatewayIntentBits.DirectMessages,
   ],
+  // Without this, DMs in a channel not cached since startup (e.g. someone
+  // typing their seats right after a restart) are silently dropped
+  partials: [Partials.Channel],
 })
 
 crashGuard.install(client);
