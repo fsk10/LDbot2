@@ -59,6 +59,19 @@ module.exports = (sequelize) => {
         allowNull: false,
         defaultValue: 0,
       },
+      // When the user last became a reserve; the reserve queue is ordered by it.
+      // Null while a participant.
+      reservesince: {
+        type: DataTypes.DATE,
+        allowNull: true,
+      },
+      // The reserve has been DMed that a seat is free for them; only then may
+      // they pick one (keeps the queue order). Reset when no longer in line.
+      seatoffered: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+      },
     },
     {
       sequelize,
@@ -73,16 +86,24 @@ module.exports = (sequelize) => {
     }
   );
 
-  // Keep participantsince in step with the reserve flag on every create/update,
-  // whichever command or flow changes it. Static Model.update() skips these
-  // hooks, so eventUsers rows must be updated through instances.
+  // Keep participantsince/reservesince in step with the reserve flag on every
+  // create/update, whichever command or flow changes it. Static Model.update()
+  // skips these hooks, so eventUsers rows must be updated through instances.
   function trackParticipantSince(row) {
     if (row.reserve) {
       row.participantsince = null;
       row.remindersent = 0;
-    } else if (row.isNewRecord || row.changed('reserve') || !row.participantsince) {
-      row.participantsince = new Date();
-      row.remindersent = 0;
+      if (row.isNewRecord || row.changed('reserve') || !row.reservesince) {
+        row.reservesince = new Date();
+        row.seatoffered = false;
+      }
+    } else {
+      row.reservesince = null;
+      row.seatoffered = false;
+      if (row.isNewRecord || row.changed('reserve') || !row.participantsince) {
+        row.participantsince = new Date();
+        row.remindersent = 0;
+      }
     }
   }
   EventUsers.addHook('beforeCreate', trackParticipantSince);

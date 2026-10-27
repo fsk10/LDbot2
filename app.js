@@ -18,7 +18,7 @@ require('./models');
 const { initializeDatabase } = require('./database/database');
 const deployCommands = require('./deploy-commands');
 const cron = require('node-cron');
-const { autoCloseEndedEventRegistrations } = require('./database/operations');
+const { autoCloseEndedEventRegistrations, tickReserveOffers } = require('./database/operations');
 const { tickAnnounceJobs } = require('./scheduler/announcementsCron');
 const { tickPaymentReminders } = require('./scheduler/paymentReminders');
 const crashGuard = require('./utils/crashGuard');
@@ -69,6 +69,8 @@ for (const file of eventFiles) {
 // Run every 10 minutes
 cron.schedule('*/10 * * * *', autoCloseEndedEventRegistrations);
 cron.schedule('*/10 * * * *', () => tickPaymentReminders(client));
+// Resumes reserve seat offers interrupted by a restart
+cron.schedule('*/10 * * * *', () => tickReserveOffers(client));
 
 // Run the announcement scheduler every minute
 cron.schedule('* * * * *', () => {

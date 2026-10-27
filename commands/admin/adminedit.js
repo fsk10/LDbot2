@@ -3,7 +3,7 @@ const { EmbedBuilder, ChannelType } = require('discord.js');
 const { Op } = require('sequelize');
 const fs = require('fs');
 const path = require('path');
-const { updateEvent, updateUser, updateEventUser, getAvailableSeatsForEvent, scheduleParticipantListUpdate } = require('../../database/operations');
+const { updateEvent, updateUser, updateEventUser, getAvailableSeatsForEvent, scheduleParticipantListUpdate, notifyEligibleReserves } = require('../../database/operations');
 const { UserModel, EventModel, EventUsersModel } = require('../../models');
 const logActivity = require('../../utils/logActivity');
 const announceRegistration = require('../../utils/announceRegistration');
@@ -178,6 +178,8 @@ async function execute(interaction, client) {
         // Pretty labels & values: Payment Config → “Sweden”, Event Adminrole → @Role, etc.
         const logText = formatEventUpdateLog(interaction.user.tag, originalEvent.name, logFields);
         logActivity(client, logText, { eventId: originalEvent.id });
+        // More seats: offer them to the reserve queue first
+        if ('seatsavailable' in updatedFields) notifyEligibleReserves(client, originalEvent.id);
         return interaction.editReply('✅ Saved.');
       } else {
         logger.error(`Error updating event: ${result.message || result.error}`);

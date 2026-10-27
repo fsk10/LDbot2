@@ -4,7 +4,7 @@ const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('
 const { Op } = require('sequelize');
 const { isEventAdminForEvent } = require('../../utils/permissions');
 const { UserModel, EventModel, EventUsersModel } = require('../../models');
-const { scheduleParticipantListUpdate } = require('../../database/operations');
+const { scheduleParticipantListUpdate, getSeatEligibility } = require('../../database/operations');
 const logActivity = require('../../utils/logActivity');
 const announceRegistration = require('../../utils/announceRegistration');
 const logger = require('../../utils/logger');
@@ -380,8 +380,9 @@ async function execute(interaction, client) {
         if (seat !== null) {
           reserve = false;
         } else {
-          const occupied = await EventUsersModel.count({ where: { eventId, reserve: false } });
-          reserve = occupied >= Number(event.seatsavailable || 0);
+          // Reserves go first: the newcomer only gets a seat if one is free beyond the queue
+          const { canTakeSeat } = await getSeatEligibility(eventId, user.id);
+          reserve = !canTakeSeat;
         }
       }
 

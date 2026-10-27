@@ -5,7 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const chartsCfg = require('../config/charts.config.json');
 const { isAdmin, isEventAdminForEvent } = require('../utils/permissions');
-const { listEvents, listUsers, listEventsForUser, generateCurrentSeatingMap, getAvailableSeatsForEvent, scheduleParticipantListUpdate } = require('../database/operations');
+const { listEvents, listUsers, listEventsForUser, generateCurrentSeatingMap, getSeatEligibility, scheduleParticipantListUpdate } = require('../database/operations');
 const { UserModel, EventModel, EventUsersModel, TemporaryRegistration } = require('../models');
 const { buildPaymentFields, getPaymentConfigForEvent } = require('../utils/payment');
 const logger = require('../utils/logger');
@@ -278,10 +278,9 @@ module.exports = {
         }
 
 
-          // Check capacity to decide reserve vs seat-pick flow
-          const occupied = await EventUsersModel.count({ where: { eventId, reserve: false } });
-          const capacity = Number(event.seatsavailable || 0);
-          const isReserve = occupied >= capacity;
+          // Decide reserve vs seat-pick flow (reserves in the queue go first)
+          const { canTakeSeat } = await getSeatEligibility(eventId, user.id);
+          const isReserve = !canTakeSeat;
 
           if (isReserve) {
             // --- RESERVE FLOW ---
@@ -422,6 +421,59 @@ module.exports = {
           await interaction.update({ embeds: [embed], components: [row] });
         } catch (error) {
           logger.error(`reg_unregister failed for ${userId}: ${error.message}`);
+          await interaction.update({ embeds: [buildRegistrationFailedEmbed()], components: [] }).catch(() => {});
+        }
+        return;
+      }
+
+      // "Choose Seat" on a seat offer DM: a reserve whose turn has come picks a seat.
+      // Same flow as Edit -> Seat Selection, the seat rules are checked again on confirm.
+      if (customId.startsWith('reserve_claim-')) {
+        const eventId = parseInt(customId.substring('reserve_claim-'.length), 10);
+        try {
+          const user = await UserModel.findOne({ where: { discorduser: userId } });
+          const event = Number.isInteger(eventId) ? await EventModel.findByPk(eventId) : null;
+          const registration = event && user
+            ? await EventUsersModel.findOne({ where: { userId: user.id, eventId: event.id } })
+            : null;
+          if (!registration) {
+            const emb = buildRegistrationFailedEmbed('You are no longer registered for this event.');
+            return interaction.update({ embeds: [emb], components: [] });
+          }
+          if (!registration.reserve) {
+            const emb = buildRegistrationFailedEmbed('You already have a seat for this event. Use **/register** to change it.');
+            return interaction.update({ embeds: [emb], components: [] });
+          }
+
+          const eligibility = await getSeatEligibility(event.id, user.id);
+          if (!eligibility.canTakeSeat) {
+            const emb = buildRegistrationFailedEmbed(`You are reserve **#${eligibility.position}**, there is no seat available for you right now.`);
+            return interaction.update({ embeds: [emb], components: [] });
+          }
+
+          await TemporaryRegistration.upsert({
+            discorduser: userId,
+            eventId: event.id,
+            event: event.name,
+            reserve: false,
+            editMode: 'seatOnly',
+            stage: 'collectingPreferredSeats',
+          });
+
+          // Disable the button first: rendering the map can take a while under load
+          await interaction.update({ components: disableAllButtonsFromMessage(interaction.message) }).catch(() => {});
+          try {
+            const seatingMapBuffer = await generateCurrentSeatingMap(event.id, { includeHolds: true });
+            await interaction.user.send({
+              files: [{ attachment: seatingMapBuffer, name: 'seating-map.png' }],
+              content: REGISTRATION_MAP_CAPTION,
+            });
+          } catch {
+            await interaction.user.send({ embeds: [buildSeatingMapErrorEmbed()] });
+          }
+          await interaction.user.send({ embeds: [buildSeatPromptEmbed()] });
+        } catch (error) {
+          logger.error(`reserve_claim failed for ${userId}: ${error.message}`);
           await interaction.update({ embeds: [buildRegistrationFailedEmbed()], components: [] }).catch(() => {});
         }
         return;
@@ -594,10 +646,10 @@ module.exports = {
                 }
             }
 
-            // capacity check...
-            const occupied = await EventUsersModel.count({ where: { eventId: temp.eventId, reserve: false } });
-            const capacity = Number(event.seatsavailable || 0);
-            const isReserve = occupied >= capacity;
+            // capacity check (reserves in the queue go first)...
+            const accountUser = await UserModel.findOne({ where: { discorduser: userId } });
+            const { canTakeSeat } = await getSeatEligibility(temp.eventId, accountUser?.id ?? null);
+            const isReserve = !canTakeSeat;
 
             if (isReserve) {
                 temp.reserve = true;
@@ -684,7 +736,7 @@ module.exports = {
               ? { eventId, haspaid: false, reserve: false }
               : { eventId, reserve: true },
             include: [{ model: UserModel, as: 'user' }],
-            order: isUnpaid ? [['seat', 'ASC']] : [['createdAt', 'ASC']],
+            order: isUnpaid ? [['seat', 'ASC']] : [['reservesince', 'ASC'], ['createdAt', 'ASC']],
           });
 
           const title = isUnpaid
@@ -788,8 +840,22 @@ module.exports = {
             return interaction.reply({ embeds: [emb], ephemeral: true });
           }
 
+          // A reserve may only pick a seat when it is their turn in the queue
+          const seatUser = await UserModel.findOne({ where: { discorduser: userId } });
+          const registration = seatUser
+            ? await EventUsersModel.findOne({ where: { userId: seatUser.id, eventId: temp.eventId } })
+            : null;
+          if (registration?.reserve) {
+            const { canTakeSeat, position } = await getSeatEligibility(temp.eventId, seatUser.id);
+            if (!canTakeSeat) {
+              const emb = buildRegistrationFailedEmbed(`You are reserve **#${position}**, there is no seat available for you yet. You will get a DM when it is your turn.`);
+              return interaction.update({ embeds: [emb], components: [] }).catch(() => interaction.reply({ embeds: [emb], ephemeral: true }));
+            }
+            temp.reserve = false;
+          }
+
           temp.editMode = 'seatOnly';
-          temp.editingExisting = true; 
+          temp.editingExisting = true;
           temp.stage = 'collectingPreferredSeats';
           await temp.save();
 
@@ -958,8 +1024,9 @@ module.exports = {
 
               if (changesSeat && !isReserve) {
                 if (!existing || existing.reserve) {
-                  const occupied = await EventUsersModel.count({ where: { eventId: temp.eventId, reserve: false } });
-                  if (occupied >= Number(eventDetails.seatsavailable || 0)) {
+                  // Reserves in the queue go first; a reserve keeps their place if it is not their turn
+                  const { canTakeSeat } = await getSeatEligibility(temp.eventId, user.id);
+                  if (!canTakeSeat) {
                     isReserve = true;
                     movedToReserve = true;
                     temp.reserve = true;
@@ -1029,8 +1096,10 @@ module.exports = {
 
             if (movedToReserve) {
               const fullEmbed = new EmbedBuilder()
-                .setTitle('Event is now full')
-                .setDescription(`All seats for **${eventName}** were taken while you were registering, so you have been added to the reserve list.`)
+                .setTitle('No seat available')
+                .setDescription(prevReserve
+                  ? `There is no seat available for you in **${eventName}** right now, so you stay on the reserve list in your current place.`
+                  : `All seats for **${eventName}** were taken while you were registering, so you have been added to the reserve list.`)
                 .setColor('#FFA500');
               await interaction.user.send({ embeds: [fullEmbed] }).catch(() => {});
             }
@@ -1302,16 +1371,11 @@ module.exports = {
           // ---------- NORMAL (not accountOnly): seat / reserve branching ----------
           await temp.save();
 
-          const seatCheck = await getAvailableSeatsForEvent(temp.eventId, temp.discorduser);
-
-          let isReserve;
-          if (!seatCheck.success || seatCheck.availableSeats <= 0) {
-            isReserve = true;
-          } else if (temp && !temp.reserve) {
-            isReserve = false;
-          } else {
-            isReserve = true;
-          }
+          // Seat vs reserve by the shared rules (reserves in the queue go first)
+          const seatUser = await UserModel.findOne({ where: { discorduser: userId } });
+          const { canTakeSeat } = await getSeatEligibility(temp.eventId, seatUser?.id ?? null);
+          const seatEventName = (await EventModel.findByPk(temp.eventId))?.name || 'this event';
+          const isReserve = !canTakeSeat;
 
           if (temp.reserve !== isReserve) {
             temp.reserve = isReserve;
@@ -1326,7 +1390,7 @@ module.exports = {
               const snap = await getRegistrationSnapshot(userId);
               const { embed, row } = buildReserveConfirmEmbed({
                 username: interaction.user.username,
-                eventName: seatCheck.eventName,
+                eventName: seatEventName,
                 snap,
                 discordUsername: interaction.user.username
               });
@@ -1344,7 +1408,7 @@ module.exports = {
             }
 
             if (interaction.inGuild()) {
-              await interaction.editReply({ embeds: [buildCheckDMsEmbed('Continue in DMs', seatCheck.eventName, '#28B81C')] }).catch(()=>{});
+              await interaction.editReply({ embeds: [buildCheckDMsEmbed('Continue in DMs', seatEventName, '#28B81C')] }).catch(()=>{});
             } else {
               try { await interaction.update({ components: disableAllButtonsFromMessage(interaction.message) }); } catch {}
             }
@@ -1364,7 +1428,7 @@ module.exports = {
 
             await interaction.user.send({ embeds: [buildSeatPromptEmbed()] });
             if (interaction.inGuild()) {
-              await interaction.editReply({ embeds: [buildCheckDMsEmbed('Continue in DMs', seatCheck.eventName, '#28B81C')] }).catch(()=>{});
+              await interaction.editReply({ embeds: [buildCheckDMsEmbed('Continue in DMs', seatEventName, '#28B81C')] }).catch(()=>{});
             } else {
               try { await interaction.update({ components: disableAllButtonsFromMessage(interaction.message) }); } catch {}
             }

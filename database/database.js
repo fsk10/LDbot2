@@ -31,6 +31,8 @@ const ADDED_COLUMNS = {
   eventUsers: {
     participantsince: { type: DataTypes.DATE, allowNull: true },
     remindersent: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+    reservesince: { type: DataTypes.DATE, allowNull: true },
+    seatoffered: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
   },
 };
 
@@ -57,6 +59,15 @@ async function backfillParticipantSince(added) {
   await sequelize.query('UPDATE eventUsers SET participantsince = createdAt WHERE reserve = 0 AND participantsince IS NULL');
   const [[{ n }]] = await sequelize.query('SELECT COUNT(*) AS n FROM eventUsers WHERE participantsince IS NOT NULL');
   logger.info(`Database: set participantsince from createdAt for ${n} participant(s).`);
+}
+
+// One-time fill when reservesince is first added: existing reserves queue in
+// signup order, which is how the reserve list was ordered before.
+async function backfillReserveSince(added) {
+  if (!added.includes('eventUsers.reservesince')) return;
+  await sequelize.query('UPDATE eventUsers SET reservesince = createdAt WHERE reserve = 1 AND reservesince IS NULL');
+  const [[{ n }]] = await sequelize.query('SELECT COUNT(*) AS n FROM eventUsers WHERE reservesince IS NOT NULL');
+  logger.info(`Database: set reservesince from createdAt for ${n} reserve(s).`);
 }
 
 // One seat can only belong to one user per event. Older databases may already
@@ -89,7 +100,9 @@ async function initializeDatabase() {
   try {
     const alter = false; // toggle for database ALTER logic on startup
     await sequelize.sync({ alter });
-    await backfillParticipantSince(await addMissingColumns());
+    const added = await addMissingColumns();
+    await backfillParticipantSince(added);
+    await backfillReserveSince(added);
     await ensureUniqueSeatIndex().catch(err => logger.warn(`Database: could not check unique seat index: ${err.message}`));
     logger.info(`Database initialized${alter ? ' (alter mode ON)' : ''}.`);
   } catch (err) {

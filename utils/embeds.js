@@ -134,6 +134,21 @@ function buildUnregisterConfirm(eventName) {
   return { embed, row };
 }
 
+// DM to a reserve whose turn has come: a seat is free for them
+function buildSeatOfferEmbed({ eventId, eventName, position }) {
+  const embed = new EmbedBuilder()
+    .setTitle('A Seat Is Available For You')
+    .setDescription(
+      `Good news! You are **#${position}** on the reserves list for **${eventName}** and a seat has opened up for you.\n\n` +
+      'Click **Choose Seat** to pick your seat. If you no longer want to attend, please use **/unregister**.'
+    )
+    .setColor('#28B81C');
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId(`reserve_claim-${eventId}`).setLabel('Choose Seat').setStyle(3),
+  );
+  return { embed, row };
+}
+
 // ---------- Seat selection ----------
 function buildSeatPromptEmbed() {
   return new EmbedBuilder()
@@ -265,6 +280,7 @@ module.exports = {
   buildCurrentRegistrationEmbed,
   buildManageRegistrationButtons,
   buildUnregisterConfirm,
+  buildSeatOfferEmbed,
   countryFlag,
   buildEditChoiceEmbed,
   buildEditChoiceButtons,

@@ -11,6 +11,7 @@ const config = require('../config/charts.config.json');
 const { loadChartById, renderMapForEvent } = require('../utils/seating');
 const { getHeldSeats } = require('../utils/seatHolds');
 const { withEventLock } = require('../utils/eventLock');
+const { buildSeatOfferEmbed } = require('../utils/embeds');
 
 // Used in the function "scheduleParticipantListUpdate"
 let updateScheduled = false;
@@ -60,11 +61,10 @@ async function addUser(userData, client) {
       return { success: false, error: 'Event not found.' };
     }
 
-    // Decide reserve if not provided by caller, based on capacity
-    const occupiedSeats = await EventUsersModel.count({ where: { eventId: userData.event, reserve: false } });
+    // Decide reserve if not provided by caller, by the shared seat rules
     if (typeof userData.reserve === 'undefined') {
-      const capacity = Number(event?.seatsavailable || 0);
-      userData.reserve = occupiedSeats >= capacity;
+      const { canTakeSeat } = await getSeatEligibility(userData.event, user.id);
+      userData.reserve = !canTakeSeat;
     }
 
     // Work out seat intent
@@ -764,11 +764,14 @@ async function renderParticipantList(client, eventId) {
   }
 }
 
+// Queue order: when they became reserve (signup order as tie-breaker)
+const RESERVE_QUEUE_ORDER = [['reservesince', 'ASC'], ['createdAt', 'ASC'], ['id', 'ASC']];
+
 async function getReserveUsersForEvent(eventId) {
   return await EventUsersModel.findAll({
     where: { eventId, reserve: true },
     include: { model: UserModel, as: 'user' },
-    order: [['createdAt', 'ASC']]
+    order: RESERVE_QUEUE_ORDER
   });
 }
 
@@ -884,6 +887,115 @@ async function handleTempRegistration(interaction, stage, eventName, eventId, us
   }
 }
 
+/* -------------------- Reserve queue -------------------- */
+
+// Pause between seat-offer DMs, so reserves higher in the queue get a head start
+const RESERVE_OFFER_DELAY_MS = 60_000;
+const offersRunning = new Set();
+
+async function getQueueState(eventId) {
+  const event = await EventModel.findByPk(eventId);
+  const capacity = Number(event?.seatsavailable || 0);
+  const participants = await EventUsersModel.count({ where: { eventId, reserve: false } });
+  const queue = await EventUsersModel.findAll({ where: { eventId, reserve: true }, order: RESERVE_QUEUE_ORDER });
+  return { event, capacity, free: capacity - participants, queue };
+}
+
+// Seat rules shared by every flow that decides seat vs reserve (userId = users.id):
+// - free = seatsavailable - participants
+// - reserves go first: the reserve at queue position p may take a seat when
+//   p <= free and they have been offered it (offers go out in queue order)
+// - anyone not yet in the event only gets a seat when free > number of reserves
+// - a participant changing seat is unaffected
+// Admin commands that set seat/reserve explicitly do not go through this.
+async function getSeatEligibility(eventId, userId = null) {
+  const { free, queue } = await getQueueState(eventId);
+  const reserveCount = queue.length;
+  const row = userId ? await EventUsersModel.findOne({ where: { eventId, userId } }) : null;
+
+  if (row && !row.reserve) {
+    return { canTakeSeat: true, isReserve: false, position: null, free, reserveCount };
+  }
+  if (row) {
+    const position = queue.findIndex(r => r.id === row.id) + 1;
+    return { canTakeSeat: position <= free && !!row.seatoffered, isReserve: true, position, free, reserveCount };
+  }
+  return { canTakeSeat: free > reserveCount, isReserve: false, position: null, free, reserveCount };
+}
+
+// Offers wait until the seating chart has room for every seat, so reserves can
+// pick the new seats however the chart and seatsavailable updates are ordered.
+async function chartHoldsCapacity(event, capacity) {
+  if (!event.chartId) return true;
+  try {
+    const { chart } = await loadChartById(event.chartId);
+    const seats = Array.isArray(chart.seats) ? chart.seats.length : 0;
+    if (seats >= capacity) return true;
+    logger.warn(`Reserve offers for event ${event.id} on hold: chart has ${seats} seats, seatsavailable is ${capacity}.`);
+  } catch (err) {
+    logger.warn(`Reserve offers for event ${event.id} on hold: could not load chart: ${err.message}`);
+  }
+  return false;
+}
+
+// DM reserves whose turn has come, one at a time in queue order with a pause
+// in between. One run per event at a time; a later call picks up anything new.
+async function notifyEligibleReserves(client, eventId) {
+  if (!client || offersRunning.has(eventId)) return;
+  offersRunning.add(eventId);
+  try {
+    for (let sent = 0; ; sent++) {
+      if (sent > 0) await new Promise(resolve => setTimeout(resolve, RESERVE_OFFER_DELAY_MS));
+
+      // Re-read every round: seats or the queue may have changed during the pause
+      const { event, capacity, free, queue } = await getQueueState(eventId);
+      if (!event || (event.enddate && new Date(event.enddate) <= new Date())) return;
+
+      // Reserves no longer in line lose their offer, so they get a new DM when back in line
+      for (const row of queue.slice(Math.max(free, 0))) {
+        if (row.seatoffered) {
+          row.seatoffered = false;
+          await row.save();
+        }
+      }
+
+      const next = queue.slice(0, Math.max(free, 0)).find(r => !r.seatoffered);
+      if (!next || !(await chartHoldsCapacity(event, capacity))) return;
+
+      // Marked before sending, so a failed DM is not retried on every change
+      next.seatoffered = true;
+      await next.save();
+
+      const user = await UserModel.findByPk(next.userId);
+      const position = queue.indexOf(next) + 1;
+      try {
+        const { embed, row } = buildSeatOfferEmbed({ eventId, eventName: event.name, position });
+        const discordUser = await client.users.fetch(user.discorduser);
+        await discordUser.send({ embeds: [embed], components: [row] });
+        logger.info(`Seat offer sent to reserve #${position} (${user.nickname}) for event ${event.name}.`);
+      } catch (err) {
+        logger.warn(`Could not DM seat offer to reserve #${position} (${user?.nickname}) for event ${event.name}: ${err.message}`);
+      }
+    }
+  } catch (err) {
+    logger.error(`Error sending reserve seat offers for event ${eventId}: ${err.message}`);
+  } finally {
+    offersRunning.delete(eventId);
+  }
+}
+
+// Safety net (cron): resumes offers interrupted by a restart, for events not yet ended
+async function tickReserveOffers(client) {
+  try {
+    const events = await EventModel.findAll({
+      where: { [Op.or]: [{ enddate: null }, { enddate: { [Op.gt]: new Date() } }] },
+    });
+    for (const event of events) notifyEligibleReserves(client, event.id);
+  } catch (err) {
+    logger.error(`Error in tickReserveOffers: ${err.message}`);
+  }
+}
+
 /* -------------------- Update scheduling -------------------- */
 
 function scheduleParticipantListUpdate(client, eventId) {
@@ -899,6 +1011,8 @@ function scheduleParticipantListUpdate(client, eventId) {
       } catch (e) {
         logger.error('Error in scheduleParticipantListUpdate:', e);
       }
+      // Every seat/reserve change ends up here: offer freed seats to the reserve queue
+      notifyEligibleReserves(client, eventId);
     }, 5000); // Wait 5 seconds before updating
   }
 }
@@ -929,6 +1043,9 @@ module.exports = {
   generateCurrentSeatingMap,
   updateParticipantList,
   getReserveUsersForEvent,
+  getSeatEligibility,
+  notifyEligibleReserves,
+  tickReserveOffers,
   createReserveListEmbed,
   isNicknameAvailable,
   handleTempRegistration,
