@@ -9,6 +9,7 @@ const logger = require('./logger');
 const STYLES = {
     registered: { color: '#2ecc71', text: (nick, event) => `🆕 **${nick}** registered for ${event}` },
     left:       { color: '#e74c3c', text: (nick, event) => `❌ **${nick}** left ${event}` },
+    seated:     { color: '#2ecc71', text: (nick, event) => `⬆️ **${nick}** got a seat at ${event} from the reserves list` },
 };
 
 async function announceRegistration(client, eventId, nickname, action) {

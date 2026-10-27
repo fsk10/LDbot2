@@ -1154,9 +1154,12 @@ module.exports = {
               where: { userId: user.id, eventId: temp.eventId },
             });
 
-            // Public announcement only for brand-new registrations, not edits
+            // Public announcement for brand-new registrations and for a reserve who
+            // just got a seat; other edits stay quiet
             if (!existingEventUser && afterRow) {
               announceRegistration(interaction.client, temp.eventId, user.nickname, 'registered');
+            } else if (prevReserve && afterRow && !afterRow.reserve) {
+              announceRegistration(interaction.client, temp.eventId, user.nickname, 'seated');
             }
 
             const after = afterRow ? {
