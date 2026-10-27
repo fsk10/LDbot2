@@ -140,11 +140,15 @@ function buildSeatOfferEmbed({ eventId, eventName, position }) {
     .setTitle('A Seat Is Available For You')
     .setDescription(
       `Good news! You are **#${position}** on the reserves list for **${eventName}** and a seat has opened up for you.\n\n` +
-      'Click **Choose Seat** to pick your seat. If you no longer want to attend, please use **/unregister**.'
+      '• **Choose Seat** to pick your seat.\n' +
+      '• **Decline** to stay on the reserves list, moved to the end of it.\n' +
+      '• **Unregister** if you no longer want to attend.'
     )
     .setColor('#28B81C');
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setCustomId(`reserve_claim-${eventId}`).setLabel('Choose Seat').setStyle(3),
+    new ButtonBuilder().setCustomId(`reserve_decline-${eventId}`).setLabel('Decline').setStyle(2),
+    new ButtonBuilder().setCustomId(`reg_unregister-${eventId}`).setLabel('Unregister').setStyle(4),
   );
   return { embed, row };
 }

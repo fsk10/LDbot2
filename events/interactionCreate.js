@@ -479,6 +479,51 @@ module.exports = {
         return;
       }
 
+      // "Decline" on a seat offer DM: stay a reserve, moved to the end of the queue;
+      // the freed turn goes to the next reserve in line
+      if (customId.startsWith('reserve_decline-')) {
+        const eventId = parseInt(customId.substring('reserve_decline-'.length), 10);
+        try {
+          const user = await UserModel.findOne({ where: { discorduser: userId } });
+          const event = Number.isInteger(eventId) ? await EventModel.findByPk(eventId) : null;
+          const registration = event && user
+            ? await EventUsersModel.findOne({ where: { userId: user.id, eventId: event.id } })
+            : null;
+          if (!registration || !registration.reserve) {
+            const msg = registration
+              ? 'You already have a seat for this event. Use **/register** to change it.'
+              : 'You are no longer registered for this event.';
+            return interaction.update({ embeds: [buildRegistrationFailedEmbed(msg)], components: [] });
+          }
+
+          // seatoffered stays set: if there are seats for the whole queue they are still
+          // in line and must not be DMed again right away; the offer run clears it once
+          // they are out of line, so they get a new DM when their turn comes back
+          registration.reservesince = new Date();
+          await registration.save();
+          // An unfinished seat pick from the offer is void now
+          if (ongoingRegistration && ongoingRegistration.eventId === event.id) {
+            await TemporaryRegistration.destroy({ where: { discorduser: userId } });
+          }
+          scheduleParticipantListUpdate(interaction.client, event.id);
+
+          const { canTakeSeat } = await getSeatEligibility(event.id, user.id);
+          const emb = new EmbedBuilder()
+            .setTitle('Seat Offer Declined')
+            .setDescription(canTakeSeat
+              ? `You stay on the reserves list for **${event.name}**, now at the end of it. There are still seats for everyone on the list, so if you change your mind use **/register** → **Edit Registration** → **Seat Selection**.`
+              : `You stay on the reserves list for **${event.name}**, now at the end of it. You will get a new DM when it is your turn again.`)
+            .setColor('#FFA500');
+          await interaction.update({ embeds: [emb], components: [] });
+
+          logActivity(interaction.client, `User **${user.nickname}** (${interaction.user.tag}) declined a seat offer for **${event.name}** and moved to the end of the reserves list.`, { eventId: event.id });
+        } catch (error) {
+          logger.error(`reserve_decline failed for ${userId}: ${error.message}`);
+          await interaction.update({ embeds: [buildRegistrationFailedEmbed()], components: [] }).catch(() => {});
+        }
+        return;
+      }
+
       // QUICK REGISTER FROM ANNOUNCEMENT
       if (customId.startsWith('register_event-')) {
         const [, rawEventId] = customId.split('-');
@@ -1565,7 +1610,8 @@ async function handleUserAutocomplete(interaction) {
       .map(user => ({ name: user.nickname, value: user.nickname }));
     await interaction.respond(matchingUsers);
   } catch (error) {
-    await interaction.respond([]);
+    // Usually the interaction already expired (user kept typing): nothing left to answer
+    await interaction.respond([]).catch(() => {});
   }
 }
 
@@ -1582,7 +1628,8 @@ async function handleUserEventAutocomplete(interaction) {
     const eventSuggestions = eventsForUser.slice(0, 25).map(event => ({ name: event.name, value: event.id.toString() }));
     await interaction.respond(eventSuggestions);
   } catch (error) {
-    await interaction.respond([]);
+    // Usually the interaction already expired (user kept typing): nothing left to answer
+    await interaction.respond([]).catch(() => {});
   }
 }
 
@@ -1621,7 +1668,8 @@ async function handleEventUserNicknameAutocomplete(interaction) {
 
     await interaction.respond(userSuggestions);
   } catch (error) {
-    await interaction.respond([]);
+    // Usually the interaction already expired (user kept typing): nothing left to answer
+    await interaction.respond([]).catch(() => {});
   }
 }
 
@@ -1644,7 +1692,8 @@ async function handleNotInEventNicknameAutocomplete(interaction) {
 
     await interaction.respond(userSuggestions);
   } catch (error) {
-    await interaction.respond([]);
+    // Usually the interaction already expired (user kept typing): nothing left to answer
+    await interaction.respond([]).catch(() => {});
   }
 }
 
@@ -1654,7 +1703,8 @@ async function handleCountryAutocomplete(interaction) {
     const matchingCountries = countries.filter(country => country.name.toLowerCase().includes(searchTerm)).slice(0, 25);
     await interaction.respond(matchingCountries);
   } catch (error) {
-    await interaction.respond([]);
+    // Usually the interaction already expired (user kept typing): nothing left to answer
+    await interaction.respond([]).catch(() => {});
   }
 }
 
@@ -1731,7 +1781,7 @@ async function handlePaymentConfigAutocomplete(interaction) {
 
     await interaction.respond(choices);
   } catch {
-    await interaction.respond([]);
+    await interaction.respond([]).catch(() => {});
   }
 }
 
