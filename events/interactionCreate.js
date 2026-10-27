@@ -1195,8 +1195,9 @@ module.exports = {
                 try { await interaction.editReply({ embeds: [buildRegistrationSubmittedEmbed()] }); } catch {}
               }
             } else {
-              // Non-reserve flow
-              if (isEditing) {
+              // Non-reserve flow. A reserve who just got a seat is a new participant:
+              // they get the full confirmation with payment details too.
+              if (isEditing && !prevReserve) {
                 const updated = new EmbedBuilder()
                   .setTitle('Registration updated')
                   .setDescription(
@@ -1241,10 +1242,11 @@ module.exports = {
                   [registrationEmbed, paymentDetailsEmbed] = createConfirmationEmbeds({
                     discorduser:     interaction.user.tag,
                     discordUsername: interaction.user.username,
-                    nickname:        temp.nickname,
-                    firstname:       temp.firstname,
-                    lastname:        temp.lastname,
-                    email:           temp.email,
+                    // A seat pick from a reserve offer carries no account details in temp
+                    nickname:        temp.nickname  || user.nickname,
+                    firstname:       temp.firstname || user.firstname,
+                    lastname:        temp.lastname  || user.lastname,
+                    email:           temp.email     || user.email,
                     country:         safeCountry,
                     seat:            temp.seat,
                     event:           eventDetails,
